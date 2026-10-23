@@ -4,12 +4,13 @@
 
 // Firebase Console → Project settings → Your apps → Web app → firebaseConfig
 export const firebaseConfig = {
-  apiKey: "PASTE_API_KEY",
-  authDomain: "PASTE_PROJECT_ID.firebaseapp.com",
-  projectId: "PASTE_PROJECT_ID",
-  storageBucket: "PASTE_PROJECT_ID.appspot.com",
-  messagingSenderId: "PASTE_SENDER_ID",
-  appId: "PASTE_APP_ID",
+  apiKey: "AIzaSyBPR8Vz2x0AL7MsFkC39LhrrPwfgAVAkuc",
+  authDomain: "echo-project-6e5f3.firebaseapp.com",
+  projectId: "echo-project-6e5f3",
+  storageBucket: "echo-project-6e5f3.firebasestorage.app",
+  messagingSenderId: "39079967391",
+  appId: "1:39079967391:web:e7e7486f2618c63ba780aa",
+  measurementId: "G-CRWLQN7MLH",
 };
 
 // dev.twitch.tv/console → Applications → твій застосунок → Client ID
