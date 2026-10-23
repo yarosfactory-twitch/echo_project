@@ -1,7 +1,7 @@
 rules_version = '2';
 
 // Правила для echo_project (тариф Spark).
-// Заміни 5OvTACJrl2aSItlCSCXnGnYjELG2 на свій UID (його покаже host.html) і опублікуй:
+// UID ведучого вписаний у isHost(). Після змін опублікуй правила:
 // Firebase Console → Firestore Database → Rules.
 service cloud.firestore {
   match /databases/{database}/documents {
