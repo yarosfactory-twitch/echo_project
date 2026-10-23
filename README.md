@@ -1,0 +1,104 @@
+# echo_project
+
+Музична карткова гра для стріму [yarosfactory](https://twitch.tv/yarosfactory): гравці збирають колоди з треків, колесо обирає тему, кожен скидає карту, чат голосує номером треку.
+
+Повні правила — у документі «echo_project: правила гри».
+
+## Як це влаштовано
+
+Безкоштовно: **GitHub Pages + Firebase Spark** (без Cloud Functions і без прив'язки картки).
+Роль сервера виконує **сторінка ведучого**: вона перевіряє Twitch-акаунти, веде фази, читає чат і рахує бали.
+Під час стріму вона все одно відкрита, тож окремий сервер не потрібен.
+
+| Сторінка | Для кого | Що робить |
+| --- | --- | --- |
+| `index.html` | гравці | вхід через Twitch, колода, вибір карти, стіл |
+| `host.html` | ведучий | керування грою, сцена для OBS, плеєр, голоси з чату |
+| `history.html` | усі | минулі ігри, п'єдестал, зіграні треки |
+
+```
+js/
+  config.js      ← заглушки, які треба заповнити
+  firebase.js    ініціалізація Firebase
+  twitch.js      вхід через Twitch, перевірка токена і віку акаунту
+  tracks.js      розбір і перевірка посилань YouTube / SoundCloud
+  votes.js       підрахунок голосів з чату
+  game-logic.js  фази, таблиця, нічия, ціни магазину, пул тем
+  chat.js        анонімне читання чату (tmi.js)
+  player.js · host.js · history.js · ui.js
+firestore.rules  правила безпеки
+tests/           тести чистої логіки (npm test)
+```
+
+## Налаштування (один раз)
+
+### 1. Firebase
+1. [console.firebase.google.com](https://console.firebase.google.com) → **Add project** → `echo-project`. Тариф лишається **Spark**.
+2. **Authentication → Sign-in method**: увімкни **Anonymous** і **Google**.
+3. **Authentication → Settings → Authorized domains**: додай `yarosfactory-twitch.github.io`.
+4. **Firestore Database → Create database** (production mode, регіон `europe-west`).
+5. **Project settings → Your apps → Web** → скопіюй `firebaseConfig` у `js/config.js`.
+
+### 2. Twitch-застосунок
+1. [dev.twitch.tv/console/apps](https://dev.twitch.tv/console/apps) → **Register Your Application**.
+2. Name: `echo_project`, Category: *Website Integration*, Client Type: **Public**.
+3. OAuth Redirect URLs (обидва):
+   - `https://yarosfactory-twitch.github.io/echo_project/`
+   - `http://localhost:5500/`
+4. Скопіюй **Client ID** у `js/config.js` → `TWITCH_CLIENT_ID`.
+
+### 3. UID ведучого
+1. Відкрий `host.html`, увійди через Google. Сторінка покаже твій UID.
+2. Впиши його в `js/config.js` (`HOST_UID`) і в `firestore.rules` (`PASTE_HOST_UID`).
+3. Firestore → **Rules** → встав вміст `firestore.rules` → **Publish**.
+
+### 4. GitHub Pages
+Створи репозиторій `yarosfactory-twitch/echo_project`, запуш код, **Settings → Pages → Deploy from branch → main / root**.
+
+### 5. OBS
+- Сторінка ведучого: **Browser Source**, захоплюй лише ліву колонку (сцену). Права колонка з кнопками в кадр не потрапляє.
+- Галочка **«Керувати аудіо через OBS»**, і в розширених налаштуваннях аудіо прибери цю доріжку з VOD-запису.
+- Перевір на тестовому стрімі, що у VOD на місці треків тиша.
+
+## Локальний запуск
+
+```bash
+npm run serve   # http://localhost:5500
+npm test        # тести логіки (Node 18+)
+```
+
+## Модель даних (Firestore)
+
+```
+meta/active                    { gameId }                       ← одна активна гра
+themes/pool                    { list: [...] }                  ← постійний пул тем
+games/{g}                      фаза, раунд, налаштування, тема, таймер, nowPlaying, final
+games/{g}/joinRequests/{uid}   { token }                        ← бачить лише ведучий
+games/{g}/players/{uid}        login, displayName, score, status, ready, cardCount
+games/{g}/decks/{uid}          { cards: [...] }                 ← бачать власник і ведучий
+games/{g}/tracks/{key}         { uid }                          ← захист від дублікатів
+games/{g}/rounds/{n}           тема, треки (анонімно до кінця голосування), thrown
+games/{g}/rounds/{n}/moves/{uid} { type: discard|pass, cardKey } ← хід гравця
+games/{g}/secret/round_{n}     хто що скинув                    ← лише ведучий
+history/{g}                    підсумок гри, лише зіграні карти
+```
+
+## Що вже працює
+- Лобі: вхід через Twitch з перевіркою віку акаунту (3 дні), до 8 гравців, кік.
+- Колода: перевірка треку (існує, можна вбудувати), заборона дублікатів у всій грі, готовність.
+- Раунд: тема з пулу (без повторів), скидання або пас з таймером, вибування за таймером, кнопка «Здатися».
+- Прослуховування: випадковий анонімний порядок, ручне перемикання, переслуховування, запасне посилання.
+- Голосування: число в чаті, останній голос, без ботів, без голосу за себе, без проміжного рахунку.
+- Кінець: останній, хто лишився, перемагає; нічия → випадковий переможець; п'єдестал і історія.
+
+## Що ще зробити
+- [ ] Карусель тем як на сторінці фільмів (зараз тема одразу з'являється).
+- [ ] Магазин: черга, заміна карти, +1 карта, подвійний раунд, жетон повторного обертання.
+- [ ] Тай-брейк: тема заздалегідь, 3 хвилини на новий трек; повторна нічия → карусель з ніками.
+- [ ] Вхід посеред гри з найнижчим рахунком.
+- [ ] Анімації столу: віяла, кидок карти, перевертання.
+- [ ] Збереження голосів у Firestore на випадок перезавантаження сторінки ведучого.
+
+## Відомі обмеження
+- Відео з віковим обмеженням YouTube не вбудовується, а перевірка при додаванні цього не бачить. Для такого випадку є посилання «Відкрити в новій вкладці».
+- Якщо перезавантажити сторінку ведучого посеред голосування, голоси, зібрані до цього, пропадуть.

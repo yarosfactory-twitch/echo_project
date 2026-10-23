@@ -1,0 +1,246 @@
+/* echo_project · «Вініловий клуб»: зелене сукно, латунь, конверти платівок. */
+:root {
+  --felt: #0d3b2c;
+  --felt-2: #12503b;
+  --felt-dark: #082a1f;
+  --brass: #d4a94a;
+  --brass-dim: #9c7a32;
+  --cream: #f3e9d2;
+  --ink: #1d1a16;
+  --muted: #a9bfb3;
+  --danger: #e2735a;
+  --ok: #7fd1a0;
+  --sleeve-a: #b8452f;
+  --sleeve-b: #2f4a7a;
+  --radius: 10px;
+  --serif: "Playfair Display", Georgia, serif;
+  --sans: "Manrope", system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+html { color-scheme: dark; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  font: 16px/1.5 var(--sans);
+  color: var(--cream);
+  background:
+    radial-gradient(ellipse at 50% 30%, var(--felt-2), var(--felt) 55%, var(--felt-dark)),
+    var(--felt);
+  background-attachment: fixed;
+}
+/* Ворс сукна */
+body::before {
+  content: ""; position: fixed; inset: 0; pointer-events: none; opacity: .18;
+  background-image: repeating-linear-gradient(45deg, rgba(0,0,0,.25) 0 1px, transparent 1px 3px);
+}
+
+h1, h2, h3, h4 { font-family: var(--serif); font-weight: 600; margin: 0 0 .5em; }
+h2 { font-size: 1.4rem; }
+a { color: var(--brass); }
+code { background: rgba(0,0,0,.35); padding: .1em .4em; border-radius: 4px; }
+
+.muted { color: var(--muted); }
+.small { font-size: .85rem; }
+.error { color: var(--danger); }
+.hint { color: var(--brass); font-weight: 700; text-align: center; }
+.link { color: var(--brass); }
+
+/* ── Шапка ─────────────────────────────── */
+.topbar {
+  position: relative; z-index: 1;
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  padding: 12px 24px; border-bottom: 1px solid rgba(212,169,74,.25);
+  background: rgba(0,0,0,.25);
+}
+.topbar nav { margin-right: auto; }
+.topbar nav a { text-decoration: none; color: var(--muted); }
+.topbar nav a:hover { color: var(--cream); }
+.logo { font-family: var(--serif); font-weight: 800; font-size: 1.5rem; color: var(--cream); text-decoration: none; letter-spacing: .02em; }
+.logo span { color: var(--brass); }
+.logo.big { font-size: clamp(2.5rem, 7vw, 5rem); }
+.topbar > div { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+.chip { display: inline-block; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--brass-dim); background: rgba(0,0,0,.3); font-size: .9rem; }
+.chip.ok { border-color: var(--ok); color: var(--ok); }
+.chip.warn { border-color: var(--danger); color: var(--danger); }
+
+/* ── Статус фази ───────────────────────── */
+.status { position: relative; z-index: 1; text-align: center; padding: 18px 16px 4px; }
+.phase { text-transform: uppercase; letter-spacing: .12em; font-size: .8rem; color: var(--muted); }
+.theme { font-family: var(--serif); font-size: clamp(1.4rem, 3vw, 2.2rem); color: var(--brass); }
+.theme.big { font-size: clamp(2rem, 4.5vw, 3.6rem); line-height: 1.15; }
+.countdown { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 1.3rem; min-height: 1.5em; }
+
+/* ── Розкладка ─────────────────────────── */
+.layout, .narrow, .host-layout { position: relative; z-index: 1; margin: 0 auto; padding: 16px; }
+.layout { max-width: 1100px; display: grid; gap: 20px; }
+.narrow { max-width: 820px; }
+.page-title { font-size: 2.2rem; text-align: center; margin: 16px 0 24px; }
+
+.panel {
+  background: rgba(8, 30, 22, .72);
+  border: 1px solid rgba(212,169,74,.3);
+  border-radius: var(--radius);
+  padding: 20px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.35);
+}
+.panel.center { text-align: center; }
+.panel + .panel { margin-top: 16px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 12px 0; }
+.row.end { justify-content: flex-end; }
+.panel.center .row { justify-content: center; }
+
+/* ── Кнопки і поля ─────────────────────── */
+.btn {
+  font: 600 1rem var(--sans); cursor: pointer;
+  padding: 10px 18px; border-radius: 8px;
+  color: var(--cream); background: rgba(0,0,0,.35);
+  border: 1px solid var(--brass-dim);
+  transition: transform .1s, background .2s;
+}
+.btn:hover:not(:disabled) { background: rgba(212,169,74,.15); }
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn.primary { background: linear-gradient(var(--brass), var(--brass-dim)); color: var(--ink); border-color: var(--brass); }
+.btn.primary:hover:not(:disabled) { background: linear-gradient(#e2bb62, var(--brass)); }
+.btn.ghost { border-color: transparent; color: var(--muted); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+
+input, textarea {
+  font: 1rem var(--sans); color: var(--cream);
+  background: rgba(0,0,0,.35); border: 1px solid rgba(212,169,74,.35);
+  border-radius: 8px; padding: 10px 12px; width: 100%;
+}
+input:focus, textarea:focus { outline: 2px solid var(--brass); outline-offset: 1px; }
+label { display: block; font-size: .9rem; color: var(--muted); margin-bottom: 12px; }
+label input, label textarea { margin-top: 4px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0 12px; }
+.add { display: flex; gap: 8px; margin: 12px 0; }
+.add input { flex: 1; }
+details { margin-top: 12px; }
+summary { cursor: pointer; color: var(--muted); }
+
+/* ── Карти-конверти ────────────────────── */
+.deck { list-style: none; padding: 0; margin: 16px 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
+.sleeve {
+  position: relative; aspect-ratio: 1; border-radius: 6px;
+  padding: 12px; display: flex; flex-direction: column; justify-content: flex-end; gap: 4px;
+  background: linear-gradient(135deg, var(--sleeve-a), #7a2a1c);
+  box-shadow: 0 6px 14px rgba(0,0,0,.45), inset 0 0 0 1px rgba(255,255,255,.08);
+  overflow: hidden;
+}
+/* Платівка, що визирає з конверта */
+.sleeve.face::after {
+  content: ""; position: absolute; top: 10px; right: -38%; width: 80%; aspect-ratio: 1; border-radius: 50%; z-index: 0;
+  background: radial-gradient(circle, var(--brass) 0 12%, #111 13% 15%, #1b1b1b 16% 100%);
+  box-shadow: inset 0 0 0 3px #000;
+  background-image:
+    radial-gradient(circle, var(--brass) 0 12%, transparent 13%),
+    repeating-radial-gradient(circle, #151515 0 2px, #222 2px 3px);
+}
+.sleeve > * { position: relative; z-index: 1; }
+.sleeve.face:nth-child(3n+2) { background: linear-gradient(135deg, var(--sleeve-b), #1a2a47); }
+.sleeve.face:nth-child(3n+3) { background: linear-gradient(135deg, #8a6a2a, #4d3a14); }
+.sleeve .title { font-weight: 700; line-height: 1.25; text-shadow: 0 1px 2px rgba(0,0,0,.7); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.sleeve .src { font-size: .7rem; text-transform: uppercase; letter-spacing: .1em; opacity: .8; }
+.sleeve .author { font-size: .85rem; color: var(--brass); font-weight: 700; }
+.sleeve .num { position: absolute; top: 8px; left: 10px; font-family: var(--serif); font-size: 2rem; font-weight: 800; z-index: 2; }
+.sleeve .x {
+  position: absolute; top: 6px; left: 6px; z-index: 2;
+  width: 26px; height: 26px; border-radius: 50%; border: none; cursor: pointer;
+  background: rgba(0,0,0,.55); color: var(--cream); font-size: 1.1rem; line-height: 1;
+}
+.sleeve.empty {
+  background: transparent; border: 2px dashed rgba(212,169,74,.35); box-shadow: none;
+  align-items: center; justify-content: center; color: var(--muted); font-size: .85rem;
+}
+/* Сорочка */
+.sleeve.back {
+  background:
+    repeating-radial-gradient(circle at 50% 50%, rgba(212,169,74,.25) 0 1px, transparent 1px 7px),
+    linear-gradient(135deg, #1e2a24, #0b1410);
+  border: 1px solid var(--brass-dim);
+}
+.sleeve.pick { cursor: pointer; transition: transform .15s, box-shadow .15s; }
+.sleeve.pick:hover { transform: translateY(-4px); }
+.sleeve.selected { transform: translateY(-8px); box-shadow: 0 0 0 3px var(--brass), 0 12px 24px rgba(0,0,0,.5); }
+.sleeve.playing { box-shadow: 0 0 0 3px var(--brass), 0 0 30px rgba(212,169,74,.5); }
+.sleeve.playing::after { animation: spin 3s linear infinite; }
+.plays .sleeve.face { animation: flip .5s ease-out; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes flip { from { transform: rotateY(90deg); } to { transform: rotateY(0); } }
+@keyframes toss {
+  from { transform: translate(0, 0) rotate(0); opacity: 1; }
+  to { transform: translate(var(--tx, 0), -120px) rotate(200deg); opacity: 0; }
+}
+
+/* ── Стіл ──────────────────────────────── */
+.felt-table {
+  position: relative; display: flex; flex-wrap: wrap; justify-content: center; gap: 28px 40px;
+  padding: 36px 20px; border-radius: 200px / 120px;
+  background: radial-gradient(ellipse, var(--felt-2), var(--felt));
+  border: 10px solid #3a2414; box-shadow: inset 0 0 40px rgba(0,0,0,.6), 0 12px 30px rgba(0,0,0,.5);
+}
+.center-pile { flex-basis: 100%; text-align: center; color: var(--muted); font-size: .9rem; min-height: 1.2em; }
+.seat { position: relative; text-align: center; min-width: 110px; }
+.seat.out { opacity: .4; }
+.seat.me .name { color: var(--brass); }
+.seat .name { font-weight: 700; }
+.seat .score { color: var(--muted); font-size: .85rem; }
+.seat .thrown { position: absolute; top: 0; left: 50%; width: 40px; animation: toss .8s ease-in forwards; }
+.fan { position: relative; height: 70px; width: 110px; margin: 0 auto 6px; }
+.fan .sleeve { position: absolute; left: 35px; bottom: 0; width: 40px; padding: 0; transform-origin: 50% 140%; transform: rotate(var(--r)); }
+
+/* ── П'єдестал ─────────────────────────── */
+.podium { display: flex; justify-content: center; align-items: flex-end; gap: 10px; margin: 20px 0; }
+.step { width: 30%; max-width: 180px; text-align: center; }
+.step .who { font-family: var(--serif); font-size: 1.15rem; font-weight: 600; overflow-wrap: anywhere; }
+.step .pts { color: var(--muted); font-size: .9rem; margin-bottom: 6px; }
+.step .block {
+  font-family: var(--serif); font-size: 2.4rem; font-weight: 800; color: var(--ink);
+  background: linear-gradient(var(--brass), var(--brass-dim)); border-radius: 6px 6px 0 0;
+  display: flex; align-items: center; justify-content: center;
+}
+.step.first .block { height: 150px; }
+.step.second .block { height: 105px; background: linear-gradient(#d9d9d9, #8f8f8f); }
+.step.third .block { height: 75px; background: linear-gradient(#c98a5a, #7a4a2a); }
+.step.empty { visibility: hidden; }
+.rest { list-style: none; padding: 0; max-width: 420px; margin: 0 auto; }
+.rest li, .seats li, .plays-list li { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px solid rgba(212,169,74,.15); }
+
+/* ── Ведучий ───────────────────────────── */
+.host-layout { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 20px; max-width: 1600px; }
+.stage-col { min-height: 70vh; }
+.stage-head { text-align: center; padding: 20px 0; }
+.stage-empty { display: grid; place-items: center; min-height: 60vh; }
+.stage-final { padding-top: 40px; }
+.stage-col .deck { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
+.player { margin-top: 20px; }
+.player iframe { width: 100%; aspect-ratio: 16 / 9; border: 0; border-radius: var(--radius); background: #000; }
+.side-col .panel { padding: 16px; }
+.seats { list-style: none; padding: 0; }
+.seats li { align-items: center; }
+.seats li.out { opacity: .45; }
+.seats img { width: 28px; height: 28px; border-radius: 50%; }
+.seats .name { flex: 1; font-weight: 600; }
+.seats .score { font-weight: 800; color: var(--brass); }
+.seats .x { background: none; border: none; color: var(--danger); font-size: 1.2rem; cursor: pointer; }
+.log { list-style: none; padding: 0; font-size: .8rem; color: var(--muted); max-height: 240px; overflow: auto; }
+
+/* ── Історія ───────────────────────────── */
+.game header { display: flex; justify-content: space-between; align-items: baseline; }
+.round h4 { margin-top: 16px; color: var(--brass); }
+.plays-list { list-style: none; padding: 0; }
+.plays-list li { align-items: baseline; }
+.plays-list li a { flex: 1; color: var(--cream); }
+.plays-list li.top a { color: var(--brass); font-weight: 700; }
+.plays-list .score { font-weight: 800; }
+
+@media (max-width: 900px) {
+  .host-layout { grid-template-columns: 1fr; }
+  .topbar { padding: 12px 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::after { animation: none !important; transition: none !important; }
+}

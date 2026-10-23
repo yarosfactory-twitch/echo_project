@@ -1,0 +1,10 @@
+{
+  "name": "echo_project",
+  "private": true,
+  "type": "module",
+  "description": "Музична карткова гра для стріму yarosfactory",
+  "scripts": {
+    "test": "node --test",
+    "serve": "npx --yes http-server -p 5500 -c-1 ."
+  }
+}

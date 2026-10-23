@@ -1,0 +1,81 @@
+rules_version = '2';
+
+// Правила для echo_project (тариф Spark).
+// Заміни PASTE_HOST_UID на свій UID (його покаже host.html) і опублікуй:
+// Firebase Console → Firestore Database → Rules.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function isHost() { return signedIn() && request.auth.uid == 'PASTE_HOST_UID'; }
+    function isSelf(uid) { return signedIn() && request.auth.uid == uid; }
+    function game(g) { return get(/databases/$(database)/documents/games/$(g)).data; }
+    function playerDoc(g) { return /databases/$(database)/documents/games/$(g)/players/$(request.auth.uid); }
+    function isActivePlayer(g) { return signedIn() && exists(playerDoc(g)) && get(playerDoc(g)).data.status == 'active'; }
+
+    // Вказівник на активну гру, пул тем, історія: читають усі, пише ведучий.
+    match /meta/{id}    { allow read: if true; allow write: if isHost(); }
+    match /themes/{id}  { allow read: if true; allow write: if isHost(); }
+    match /history/{id} { allow read: if true; allow write: if isHost(); }
+
+    match /games/{g} {
+      allow read: if true;
+      allow write: if isHost();
+
+      // Заявка на вхід: гравець кладе свій Twitch-токен, ведучий перевіряє і видаляє.
+      match /joinRequests/{uid} {
+        allow read: if isHost() || isSelf(uid);
+        allow create: if isSelf(uid)
+          && request.resource.data.keys().hasOnly(['token', 'createdAt'])
+          && request.resource.data.token is string;
+        allow update: if isHost();
+        allow delete: if isHost() || isSelf(uid);
+      }
+
+      // Гравці: створює ведучий після перевірки. Сам гравець може змінити лише
+      // готовність, кількість карт у лобі і здатися (status → 'out', але не назад).
+      match /players/{uid} {
+        allow read: if true;
+        allow create, delete: if isHost();
+        allow update: if isHost() || (isSelf(uid)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ready', 'cardCount', 'status'])
+          && (request.resource.data.status == resource.data.status || request.resource.data.status == 'out'));
+      }
+
+      // Колода видна лише власнику і ведучому. Гравець редагує її тільки в лобі.
+      match /decks/{uid} {
+        allow read: if isHost() || isSelf(uid);
+        allow write: if isHost() || (isSelf(uid) && game(g).phase == 'lobby');
+      }
+
+      // Реєстр треків гри для перевірки дублікатів. Документ можна лише створити:
+      // якщо трек уже взяв хтось інший, запис буде відхилено.
+      match /tracks/{key} {
+        allow read: if isHost();
+        allow create: if isActivePlayer(g) && game(g).phase == 'lobby'
+          && request.resource.data.keys().hasOnly(['uid'])
+          && request.resource.data.uid == request.auth.uid;
+        allow delete: if isHost() || (signedIn() && resource.data.uid == request.auth.uid);
+      }
+
+      // Раунд публічний, але автори в ньому з'являються лише після голосування.
+      match /rounds/{n} {
+        allow read: if true;
+        allow write: if isHost();
+
+        // Хід гравця бачать лише він сам і ведучий.
+        match /moves/{uid} {
+          allow read: if isHost() || isSelf(uid);
+          allow create: if isSelf(uid) && isActivePlayer(g)
+            && game(g).phase == 'discard' && string(game(g).round) == n
+            && request.resource.data.type in ['discard', 'pass']
+            && request.resource.data.cardKey is string;
+          allow delete: if isHost();
+        }
+      }
+
+      // Хто який трек скинув, до розкриття знає лише ведучий.
+      match /secret/{id} { allow read, write: if isHost(); }
+    }
+  }
+}
