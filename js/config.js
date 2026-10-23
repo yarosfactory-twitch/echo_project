@@ -13,7 +13,7 @@ export const firebaseConfig = {
 };
 
 // dev.twitch.tv/console → Applications → твій застосунок → Client ID
-export const TWITCH_CLIENT_ID = "PASTE_TWITCH_CLIENT_ID";
+export const TWITCH_CLIENT_ID = "i7ftpfr0j4c6345ih1ahqquo3syh1s";
 
 // UID ведучого у Firebase. Сторінка host.html покаже його після першого входу.
 // Той самий UID треба вписати у firestore.rules.
