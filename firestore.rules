@@ -1,13 +1,13 @@
 rules_version = '2';
 
 // Правила для echo_project (тариф Spark).
-// Заміни PASTE_HOST_UID на свій UID (його покаже host.html) і опублікуй:
+// Заміни 5OvTACJrl2aSItlCSCXnGnYjELG2 на свій UID (його покаже host.html) і опублікуй:
 // Firebase Console → Firestore Database → Rules.
 service cloud.firestore {
   match /databases/{database}/documents {
 
     function signedIn() { return request.auth != null; }
-    function isHost() { return signedIn() && request.auth.uid == 'PASTE_HOST_UID'; }
+    function isHost() { return signedIn() && request.auth.uid == '5OvTACJrl2aSItlCSCXnGnYjELG2'; }
     function isSelf(uid) { return signedIn() && request.auth.uid == uid; }
     function game(g) { return get(/databases/$(database)/documents/games/$(g)).data; }
     function playerDoc(g) { return /databases/$(database)/documents/games/$(g)/players/$(request.auth.uid); }

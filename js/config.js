@@ -18,7 +18,7 @@ export const TWITCH_CLIENT_ID = "i7ftpfr0j4c6345ih1ahqquo3syh1s";
 
 // UID ведучого у Firebase. Сторінка host.html покаже його після першого входу.
 // Той самий UID треба вписати у firestore.rules.
-export const HOST_UID = "PASTE_HOST_UID";
+export const HOST_UID = "5OvTACJrl2aSItlCSCXnGnYjELG2";
 
 export const TWITCH_CHANNEL = "yarosfactory";
 
