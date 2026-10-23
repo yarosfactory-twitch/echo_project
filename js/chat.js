@@ -2,6 +2,12 @@
 // tmi.js підключається звичайним <script> у host.html → глобальна змінна tmi.
 
 export function connectChat(channel, onMessage, onStatus = () => {}) {
+  if (!window.tmi) {
+    console.error("tmi.js не завантажився: перевір <script> у host.html або блокувальник реклами");
+    onStatus("error");
+    return null;
+  }
+  onStatus("connecting");
   const client = new window.tmi.Client({
     connection: { reconnect: true, secure: true },
     channels: [channel],

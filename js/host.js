@@ -440,7 +440,7 @@ function viewAuth() {
       <p class="muted small">Впиши його в <code>js/config.js</code> (HOST_UID) і у <code>firestore.rules</code>, опублікуй правила й онови сторінку.</p>
       <button class="btn ghost" data-action="signOut">Вийти</button></div>`;
   }
-  const chat = { connected: "чат підключено", disconnected: "чат відключено", error: "помилка чату", off: "чат…" }[S.chat];
+  const chat = { connected: "чат підключено", connecting: "підключаю чат…", disconnected: "чат відключено", error: "помилка чату (F12 → Console)", off: "чат…" }[S.chat];
   return `<span class="chip">${esc(S.user.displayName ?? "ведучий")}</span><span class="chip ${S.chat === "connected" ? "ok" : "warn"}">${chat}</span>`;
 }
 
