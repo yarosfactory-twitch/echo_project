@@ -3,7 +3,7 @@
 
 export function connectChat(channel, onMessage, onStatus = () => {}) {
   if (!window.tmi) {
-    console.error("tmi.js не завантажився: перевір <script> у host.html або блокувальник реклами");
+    console.error("tmi.js не завантажився: перевір js/vendor/tmi.min.js у host.html");
     onStatus("error");
     return null;
   }
