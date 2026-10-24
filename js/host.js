@@ -85,6 +85,8 @@ function subscribeGame(id) {
     onSnapshot(gref(), (s) => { S.game = s.data() ?? null; syncRound(); resumeVoting(); onMovesChanged(); render(); }),
     onSnapshot(gcol("players"), (s) => {
       S.players = s.docs.map((d) => ({ uid: d.id, ...d.data() }));
+      for (const p of S.players) justSeated.delete(p.uid);
+      cleanupLeftLobby();
       checkLastStanding();
       render();
     }),
@@ -112,17 +114,22 @@ function syncRound() {
 }
 
 // ── Перевірка заявок (замість Cloud Function) ───────────────
+// Запити до Twitch для різних гравців ідуть паралельно. Послідовно (через
+// seatLock) робиться лише сам вхід за стіл, щоб не перевищити 8 місць.
 const verifying = new Set();
-let verifyQueue = Promise.resolve();
+let seatLock = Promise.resolve();
+const justSeated = new Set();
 
 function queueVerify(req) {
   if (verifying.has(req.uid)) return;
   verifying.add(req.uid);
-  verifyQueue = verifyQueue.then(async () => {
-    try { await verify(req); } catch (e) { log(`⚠ перевірка: ${e.message}`); }
-    finally { verifying.delete(req.uid); }
-  });
+  verify(req)
+    .catch((e) => log(`⚠ перевірка: ${e.message}`))
+    .finally(() => verifying.delete(req.uid));
 }
+
+/** Крок для кільця прогресу в гравця. Не критично, тож помилки ігноруємо. */
+const setStep = (ref, step) => updateDoc(ref, { step }).catch(() => {});
 
 async function verify({ uid, token }) {
   const ref = gref("joinRequests", uid);
@@ -130,21 +137,37 @@ async function verify({ uid, token }) {
     await updateDoc(ref, { status: "rejected", reason, token: deleteField() });
     log(`✗ ${who}: ${reason}`);
   };
+  setStep(ref, "token");
   const info = token ? await validateToken(token) : null;
   if (!info || info.client_id !== TWITCH_CLIENT_ID) return reject("Вхід Twitch недійсний, спробуй ще раз");
+  setStep(ref, "profile");
   const user = await getTwitchUser(token, info.user_id);
   revokeToken(token);
   if (!user) return reject("Не вдалося отримати дані акаунту Twitch", info.login);
+  setStep(ref, "seat");
 
+  const run = seatLock.then(() => seat(uid, ref, user, reject));
+  seatLock = run.catch(() => {});
+  return run;
+}
+
+async function seat(uid, ref, user, reject) {
   const existing = S.players.find((p) => p.login === user.login);
-  if (existing && existing.uid === uid) { await deleteDoc(ref); return; }
-  if (existing) return reject("Цей Twitch-акаунт уже в грі з іншого браузера", user.login);
+  // Той самий браузер повернувся (перезавантажив сторінку) — місце вже його.
+  if (existing && existing.uid === uid && existing.status === "active") { await deleteDoc(ref); return; }
+  if (existing && existing.uid !== uid && existing.status === "active") {
+    return reject("Цей Twitch-акаунт уже в грі з іншого браузера", user.login);
+  }
   if (accountAgeDays(user.created_at) < MIN_ACCOUNT_AGE_DAYS) {
     return reject(`Акаунту має бути щонайменше ${MIN_ACCOUNT_AGE_DAYS} дні`, user.login);
   }
   if (S.game?.phase !== PHASE.LOBBY) return reject("Гра вже почалась", user.login); // TODO: вхід посеред гри
-  if (activePlayers().length >= MAX_PLAYERS) return reject("Лобі заповнене", user.login);
+  // S.players оновлюється із затримкою, тож рахуємо й тих, кого щойно посадили.
+  const taken = new Set([...activePlayers().map((p) => p.uid), ...justSeated]);
+  taken.delete(uid);
+  if (taken.size >= MAX_PLAYERS) return reject("Лобі заповнене", user.login);
 
+  justSeated.add(uid);
   await setDoc(gref("players", uid), {
     login: user.login, displayName: user.display_name, avatar: user.profile_image_url,
     score: 0, status: "active", ready: false, cardCount: 0, joinedRound: S.game.round, joinedAt: serverTimestamp(),
@@ -306,6 +329,22 @@ const A = {
     await finalize(winner.uid);
   }),
 };
+
+/** Гравець натиснув «Вийти» в лобі (status → out): прибираємо його місце й колоду. */
+function cleanupLeftLobby() {
+  if (S.game?.phase !== PHASE.LOBBY) return;
+  for (const p of S.players.filter((x) => x.status === "out")) {
+    once(`leave-${p.uid}`, async () => {
+      const batch = writeBatch(db);
+      const tracks = await getDocs(query(gcol("tracks"), where("uid", "==", p.uid)));
+      tracks.forEach((t) => batch.delete(t.ref));
+      batch.delete(gref("decks", p.uid));
+      batch.delete(gref("players", p.uid));
+      await batch.commit();
+      log(`${p.displayName} вийшов з лобі`);
+    });
+  }
+}
 
 function canStart() {
   const ps = activePlayers();

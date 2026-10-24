@@ -102,9 +102,14 @@ const actions = {
   select(key) { S.selected = key; render(); },
   async discard() { await sendMove("discard"); },
   async pass() { await sendMove("pass"); },
-  async surrender() {
-    if (!confirm("Здатися? Ти вибудеш з гри, але зможеш голосувати в чаті.")) return;
-    await updateDoc(gref("players", S.uid), { status: "out" });
+  async leave() {
+    const inLobby = S.game.phase === PHASE.LOBBY;
+    const text = inLobby
+      ? "Вийти з лобі? Твоє місце звільниться, а колоду доведеться збирати заново."
+      : "Вийти з гри? Ти вибудеш, твої бали лишаться в таблиці, а голосувати в чаті ти зможеш і далі.";
+    if (!confirm(text)) return;
+    // У лобі ведучий побачить status=out і прибере місце та колоду.
+    await updateDoc(gref("players", S.uid), { status: "out", ready: false });
   },
 };
 
@@ -156,10 +161,13 @@ document.addEventListener("submit", (e) => {
 
 // ── Рендер ──────────────────────────────────────────────────
 function render() {
-  patch(els.me, S.me ? `<span class="chip">${esc(S.me.displayName)} · ${S.me.score ?? 0} б.</span>` : "");
+  const canLeave = S.me?.status === "active" && S.game && S.game.phase !== PHASE.FINAL;
+  patch(els.me, S.me ? `<span class="chip">${esc(S.me.displayName)} · ${S.me.score ?? 0} б.</span>
+    ${canLeave ? `<button class="btn ghost small" data-action="leave">${S.game.phase === PHASE.LOBBY ? "Вийти з лобі" : "Вийти з гри"}</button>` : ""}` : "");
   patch(els.status, viewStatus());
   patch(els.main, viewMain());
   patch(els.table, viewTable());
+  applyJoinProgress();
   tick();
 }
 
@@ -177,6 +185,7 @@ function viewMain() {
   if (!S.me) return viewJoin();
   if (S.me.status === "out") {
     if (S.game.phase === PHASE.FINAL) return viewFinal();
+    if (S.game.phase === PHASE.LOBBY) return `<section class="panel center"><h2>Виходимо з лобі…</h2></section>`;
     return `<section class="panel center"><h2>Ти вибув з гри</h2><p class="muted">Тепер можеш голосувати в чаті за будь-який трек.</p></section>${viewRound()}`;
   }
   switch (S.game.phase) {
@@ -186,7 +195,7 @@ function viewMain() {
     case PHASE.LISTEN: case PHASE.VOTE: case PHASE.RESULTS: return viewRound();
     case PHASE.FINAL: return viewFinal();
     case PHASE.TIEBREAK: return `<section class="panel center"><h2>Нічия!</h2><p class="muted">Ведучий визначає переможця.</p></section>`;
-    default: return `<section class="panel center"><p class="muted">Ведучий готує наступний раунд…</p>${surrenderBtn()}</section>`;
+    default: return `<section class="panel center"><p class="muted">Ведучий готує наступний раунд…</p></section>`;
   }
 }
 
@@ -196,7 +205,7 @@ function viewJoin() {
     return `<section class="panel center"><h2>Не вдалося приєднатися</h2><p class="error">${esc(r.reason)}</p>
       <button class="btn" data-action="join">Спробувати ще раз</button></section>`;
   }
-  if (r || pendingToken) return `<section class="panel center"><h2>Ведучий перевіряє акаунт…</h2><p class="muted">Це займе кілька секунд.</p></section>`;
+  if (r || pendingToken) return JOIN_WAIT_HTML;
   const seats = S.players.filter((p) => p.status === "active").length;
   if (S.game.phase !== PHASE.LOBBY) {
     // TODO: вхід посеред гри (місця, N карт на решту раундів, найнижчий рахунок).
@@ -246,7 +255,7 @@ function viewHand() {
   const hand = (S.deck ?? []).filter((c) => !c.used);
   if (!hand.length) {
     return `<section class="panel center"><h2>Карт не лишилось</h2>
-      <p class="muted">Ти автоматично пасуєш у цьому раунді й лишаєшся за столом.</p>${surrenderBtn()}</section>`;
+      <p class="muted">Ти автоматично пасуєш у цьому раунді й лишаєшся за столом.</p></section>`;
   }
   const cards = hand.map((c) => `<li class="sleeve face pick ${S.selected === c.key ? "selected" : ""}" data-action="select" data-arg="${esc(c.key)}">
       <span class="src">${sourceLabel(c.source)}</span><span class="title">${esc(c.title)}</span></li>`).join("");
@@ -256,7 +265,6 @@ function viewHand() {
     <div class="row">
       <button class="btn primary" data-action="discard" ${S.selected ? "" : "disabled"}>Скинути карту</button>
       <button class="btn" data-action="pass" ${S.selected ? "" : "disabled"} title="Обрана карта згорить, 0 балів за раунд">Пас</button>
-      ${surrenderBtn()}
     </div>
     <p class="muted small">Не встигнеш ні скинути, ні пасувати — вибуваєш.</p>
   </section>`;
@@ -297,7 +305,38 @@ function viewTable() {
   return `<div class="felt-table"><div class="center-pile">${showThrown ? `${thrown.size} карт у центрі` : ""}</div>${seatHTML}</div>`;
 }
 
-const surrenderBtn = () => `<button class="btn ghost" data-action="surrender">Здатися</button>`;
+// ── Очікування входу: кільце прогресу навколо платівки ──────
+// Розмітка завжди однакова, тож patch() її не перестворює, і кільце
+// плавно заповнюється (CSS transition). Крок і відсоток ставить applyJoinProgress().
+const JOIN_WAIT_HTML = `<section class="panel center join-wait">
+  <div class="ring-vinyl">
+    <svg viewBox="0 0 120 120" aria-hidden="true">
+      <circle class="ring-track" cx="60" cy="60" r="56"/>
+      <circle id="join-ring" class="ring-bar" cx="60" cy="60" r="56" pathLength="100"/>
+    </svg>
+    <div class="vinyl"></div>
+  </div>
+  <h2 id="join-step">Надсилаю заявку…</h2>
+  <p class="muted small">Сторінка ведучого перевіряє твій Twitch-акаунт.</p>
+</section>`;
+
+const JOIN_STEPS = {
+  sending: [12, "Надсилаю заявку…"],
+  queued: [30, "Чекаю на ведучого…"],
+  token: [50, "Перевіряю вхід Twitch…"],
+  profile: [70, "Дивлюсь акаунт…"],
+  seat: [90, "Саджу за стіл…"],
+};
+
+function applyJoinProgress() {
+  const ring = $("#join-ring");
+  if (!ring) return;
+  const key = S.request ? (S.request.step ?? "queued") : "sending";
+  const [pct, label] = JOIN_STEPS[key] ?? JOIN_STEPS.queued;
+  ring.style.strokeDashoffset = String(100 - pct);
+  const el = $("#join-step");
+  if (el && el.textContent !== label) el.textContent = label;
+}
 
 function tick() {
   const el = $("#countdown");
