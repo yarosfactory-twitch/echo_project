@@ -8,9 +8,10 @@ import { resolveTrack, TrackError, formatTimecode } from "./tracks.js";
 import { PHASE, PHASE_LABEL, deckSize, lateJoinOpen } from "./game-logic.js";
 import { MAX_PLAYERS } from "./config.js";
 import { Reel } from "./reel.js";
+import { fireConfetti } from "./confetti.js";
 import { VinylWheel } from "./wheel.js";
 import { SHOP_ITEMS, priceOf } from "./shop.js";
-import { $, esc, patch, fmtCountdown, sourceLabel, tableHTML, standingsHTML, originalityHTML, flipClass, plural, POINTS } from "./ui.js";
+import { $, esc, patch, fmtCountdown, sourceLabel, tableHTML, standingsHTML, originalityHTML, flipAttr, plural, POINTS } from "./ui.js";
 
 const els = { me: $("#me"), status: $("#status"), main: $("#main"), table: $("#table") };
 
@@ -45,6 +46,11 @@ function markLive(prev, next) {
   if (next.spin?.id && next.spin.id !== prev.spin?.id) liveSpins.add(next.spin.id);
   if (next.wheel?.id && next.wheel.id !== prev.wheel?.id) liveSpins.add(next.wheel.id);
 }
+/** Перемога: конфеті, лише коли фінал настав наживо (не при відкритті сторінки). Звук — зі стріму. */
+function celebrate(prev, next) {
+  if (!prev || !next || prev.phase === next.phase || next.phase !== "final") return;
+  setTimeout(fireConfetti, 150);
+}
 const isFresh = (x) => liveSpins.has(x.id) || Date.now() - (x.at ?? 0) < x.ms + 1500;
 
 const gref = (...path) => doc(db, "games", S.gameId, ...path);
@@ -69,7 +75,7 @@ function subscribeGame(id) {
   if (!id) return;
 
   gameSubs.push(
-    onSnapshot(gref(), (s) => { const next = s.data() ?? null; markLive(S.game, next); S.game = next; syncRound(); render(); }),
+    onSnapshot(gref(), (s) => { const next = s.data() ?? null; markLive(S.game, next); celebrate(S.game, next); S.game = next; syncRound(); render(); }),
     onSnapshot(collection(db, "games", id, "players"), (s) => {
       S.players = s.docs.map((d) => ({ uid: d.id, ...d.data() }));
       S.me = S.players.find((p) => p.uid === S.uid) ?? null;
@@ -169,6 +175,10 @@ const actions = {
     if (!canDouble()) return;
     S.doubleSent = S.game.round; render();
     await setDoc(gref("rounds", String(S.game.round), "double", S.uid), { at: serverTimestamp() });
+  },
+  async shopReady() {
+    if (S.game.phase !== PHASE.SHOP || S.me?.status !== "active") return;
+    await updateDoc(gref("players", S.uid), { ready: !S.me.ready });
   },
   async respin() {
     const g = S.game;
@@ -470,8 +480,8 @@ function viewRound() {
     const chosen = voting && S.myVote === p.slot;
     const click = voting && !mine ? ` data-action="vote" data-arg="${p.slot}" title="Проголосувати за №${p.slot}"` : "";
     const badge = mine ? `<span class="vote-badge mine">твій трек</span>` : chosen ? `<span class="vote-badge">твій голос</span>` : "";
-    const flip = open ? flipClass(`${S.gameId}-${S.game.round}-${p.slot}`) : "";
-    return `<li class="sleeve ${open ? "face" : "back"}${flip}${playing}${click ? " votable" : ""}${chosen ? " voted" : ""}${mine ? " mine" : ""}"${click}><span class="num">${p.slot}</span>
+    const flip = open ? flipAttr(`${S.gameId}-${S.game.round}-${p.slot}`) : { cls: "", style: "" };
+    return `<li class="sleeve ${open ? "face" : "back"}${flip.cls}${playing}${click ? " votable" : ""}${chosen ? " voted" : ""}${mine ? " mine" : ""}"${flip.style}${click}><span class="num">${p.slot}</span>
       ${open ? `<span class="title">${esc(p.title)}</span>` : ""}${author}${badge}</li>`;
   }).join("");
   const hint = S.game.phase !== PHASE.VOTE ? ""
@@ -555,6 +565,10 @@ function viewShop() {
     ${S.error ? `<p class="error">${esc(S.error)}</p>` : ""}
     <ul class="shop">${cards}</ul>
     ${log ? `<h3>Твої покупки</h3><ul class="shop-mine">${log}</ul>` : ""}
+    <div class="shop-ready">
+      <button class="btn ${me.ready ? "" : "primary"}" data-action="shopReady">${me.ready ? "Ще хочу щось купити" : "Готовий"}</button>
+      <span class="muted small">Готові: ${S.players.filter((p) => p.status === "active" && p.ready).length} / ${S.players.filter((p) => p.status === "active").length}. Коли готові всі — магазин закриється.</span>
+    </div>
   </section>`;
 }
 

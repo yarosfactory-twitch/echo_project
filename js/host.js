@@ -14,13 +14,14 @@ import { embedUrl, formatTimecode } from "./tracks.js";
 import { VoteCollector } from "./votes.js";
 import { findDuplicateGroups, burnPlan, burnedKeys } from "./originality.js";
 import { connectChat } from "./chat.js";
-import { Reel, SPIN_MS } from "./reel.js";
+import { Reel, SPIN_MS, playSfx } from "./reel.js";
+import { fireConfetti } from "./confetti.js";
 import { VinylWheel, WHEEL_MS } from "./wheel.js";
 import { itemById, priceOf, applyQueue, roundPoints, tiebreakOriginality, tiebreakWinners, SHOP_ITEMS } from "./shop.js";
 import {
   PHASE, PHASE_LABEL, MODE_LABEL, deckSize, freshThemes, roundsLeft, lateJoinOpen, lateJoinScore, cryptoRandom, shuffle, pickRandom, standings, leadersTie, DEFAULT_THEMES,
 } from "./game-logic.js";
-import { $, esc, patch, fmtCountdown, sourceLabel, standingsHTML, originalityHTML, tableHTML, flipClass, plural, CARDS, POINTS } from "./ui.js";
+import { $, esc, patch, fmtCountdown, sourceLabel, standingsHTML, originalityHTML, tableHTML, flipAttr, plural, CARDS, POINTS } from "./ui.js";
 
 const els = {
   auth: $("#auth"), control: $("#control"), stage: $("#stage"), reel: $("#reel"), top: $("#top-stage"), wheel: $("#wheel"),
@@ -68,6 +69,11 @@ function markLive(prev, next) {
   if (next.spin?.id && next.spin.id !== prev.spin?.id) liveSpins.add(next.spin.id);
   if (next.wheel?.id && next.wheel.id !== prev.wheel?.id) liveSpins.add(next.wheel.id);
 }
+/** Перемога: конфеті (і фанфари на сторінці ведучого), лише коли фінал настав наживо. */
+function celebrate(prev, next) {
+  if (!prev || !next || prev.phase === next.phase || next.phase !== "final") return;
+  setTimeout(() => { fireConfetti(); playSfx("fanfare", 0.6); }, 150);
+}
 const isFresh = (x) => liveSpins.has(x.id) || Date.now() - (x.at ?? 0) < x.ms + 1500;
 
 const gref = (...path) => doc(db, "games", S.gameId, ...path);
@@ -112,12 +118,13 @@ function subscribeGame(id) {
   render();
   if (!id) return;
   gameSubs.push(
-    onSnapshot(gref(), (s) => { const next = s.data() ?? null; markLive(S.game, next); S.game = next; syncRound(); resumeVoting(); onMovesChanged(); applySiteVotes(); render(); }),
+    onSnapshot(gref(), (s) => { const next = s.data() ?? null; markLive(S.game, next); celebrate(S.game, next); S.game = next; syncRound(); resumeVoting(); onMovesChanged(); applySiteVotes(); render(); }),
     onSnapshot(gcol("players"), (s) => {
       S.players = s.docs.map((d) => ({ uid: d.id, ...d.data() }));
       for (const p of S.players) justSeated.delete(p.uid);
       cleanupLeftLobby();
       checkLastStanding();
+      maybeAutoCloseShop();
       render();
     }),
     onSnapshot(gcol("joinRequests"), (s) => {
@@ -500,11 +507,15 @@ const A = {
   nextRound: () => once("nextRound", async () => {
     if (S.game.tiebreak) return resolveTiebreak();
     if (S.game.round >= S.game.settings.rounds) return finish();
-    // Між раундами — магазин (з 2-го раунду).
-    await updateDoc(gref(), {
+    // Між раундами — магазин (з 2-го раунду). Готовність скидаємо: гравці тиснуть «Готовий»
+    // у магазині, і коли готові всі — магазин закривається сам.
+    const batch = writeBatch(db);
+    for (const p of activePlayers()) batch.update(gref("players", p.uid), { ready: false });
+    batch.update(gref(), {
       round: S.game.round + 1, phase: PHASE.SHOP, theme: null, nowPlaying: null, revealed: [], phaseEndsAt: null,
       mods: { round: S.game.round + 1, queue: [], double: [] },
     });
+    await batch.commit();
   }),
 
   toSpin: () => once("toSpin", async () => { await updateDoc(gref(), { phase: PHASE.SPIN }); }),
@@ -820,11 +831,23 @@ function boughtThisRound(n) {
 }
 
 /** Обробляє заявки по черзі за часом. Ціну рахуємо тут, з актуальних балів. */
+/** Усі за столом натиснули «Готовий» і всі покупки оброблено — закриваємо магазин. */
+function maybeAutoCloseShop() {
+  if (S.game?.phase !== PHASE.SHOP) return;
+  const ps = activePlayers();
+  const pendingBuys = S.shopReqs.some((r) => !r.status);
+  if (ps.length && ps.every((p) => p.ready) && !pendingBuys) {
+    log("Усі готові — магазин закрито");
+    A.closeShop();
+  }
+}
+
 async function processShop() {
   const g = S.game;
   if (!g || g.phase !== PHASE.SHOP) return;
   const pending = S.shopReqs.filter((r) => !r.status && !shopDone.has(r.id))
     .sort((a, b) => (a.at?.seconds ?? 0) - (b.at?.seconds ?? 0) || (a.at?.nanoseconds ?? 0) - (b.at?.nanoseconds ?? 0));
+  if (!pending.length) maybeAutoCloseShop();
   for (const req of pending) {
     shopDone.add(req.id);
     try {
@@ -935,8 +958,8 @@ async function processRespins() {
     if (!p || p.status !== "active" || !(fresh?.tokens > 0)) continue;
     log(`🔄 ${p.displayName} використовує жетон — перекручуємо барабан`);
     await updateDoc(gref("players", r.uid), { tokens: increment(-1) });
-    // Стара тема повертається в барабан.
-    await doSpin([...(g.themesLeft ?? []), g.theme], { respinBy: p.displayName });
+    // Стара тема в барабан не повертається (themesLeft її вже не містить).
+    await doSpin(g.themesLeft ?? [], { respinBy: p.displayName });
     return; // одне перекручування за раз
   }
 }
@@ -1175,7 +1198,9 @@ function viewControl() {
     }
     case PHASE.SHOP: {
       const done = S.shopReqs.filter((r) => r.status === "ok").length;
-      body = `<p class="muted">Гравці купують плюшки. Покупок: ${done}. Коли всі готові — до барабана.</p>${b("closeShop", "Закрити магазин і до барабана", { primary: true })}`;
+      const ps = activePlayers();
+      const ready = ps.filter((p) => p.ready).length;
+      body = `<p class="muted">Покупок: ${done} · готові: ${ready} / ${ps.length}. Коли всі натиснуть «Готовий», магазин закриється сам.</p>${b("closeShop", "Закрити магазин зараз", { primary: true })}`;
       break;
     }
     case PHASE.SPIN: {
@@ -1255,8 +1280,8 @@ function viewStage() {
     const open = revealed.has(p.slot) || S.round.revealed;
     const author = S.round.revealed ? `<span class="author">${esc(p.displayName)} · ${p.votes} гол.</span>` : "";
     const click = clickable ? ` data-action="play" data-arg="${p.slot}" title="Увімкнути трек №${p.slot}"` : "";
-    const flip = open ? flipClass(`${S.gameId}-${g.round}-${p.slot}`) : "";
-    return `<li class="sleeve ${open ? "face" : "back"}${flip}${g.nowPlaying === p.slot ? " playing" : ""}${clickable ? " clickable" : ""}"${click}><span class="num">${p.slot}</span>
+    const flip = open ? flipAttr(`${S.gameId}-${g.round}-${p.slot}`) : { cls: "", style: "" };
+    return `<li class="sleeve ${open ? "face" : "back"}${flip.cls}${g.nowPlaying === p.slot ? " playing" : ""}${clickable ? " clickable" : ""}"${flip.style}${click}><span class="num">${p.slot}</span>
       ${open ? `<span class="src">${sourceLabel(p.source)}</span><span class="title">${esc(p.title)}</span>` : ""}${author}</li>`;
   }).join("");
   const notice = g.tiebreak ? noticeHTML() : "";

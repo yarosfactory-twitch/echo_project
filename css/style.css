@@ -254,21 +254,22 @@ summary { cursor: pointer; color: var(--muted); }
 .sleeve.kept { box-shadow: 0 0 0 2px var(--ok), 0 6px 14px rgba(0,0,0,.45); }
 
 /* Згоряння: карта жовтіє, полум'я піднімається знизу, лишається обвуглена. */
-.sleeve.burning { animation: char 1.6s ease-in var(--d, 0s) forwards; }
-.sleeve.burning > span:not(.stamp), .sleeve.burning::after { animation: char-ink 1.6s ease-in var(--d, 0s) forwards; }
+/* --t: скільки вже минуло (мс) — щоб перемальовування не перезапускало згоряння */
+.sleeve.burning { animation: char 1.6s ease-in calc(var(--d, 0s) - var(--t, 0ms)) forwards; }
+.sleeve.burning > span:not(.stamp), .sleeve.burning::after { animation: char-ink 1.6s ease-in calc(var(--d, 0s) - var(--t, 0ms)) forwards; }
 .sleeve.burning::before {
   content: ""; position: absolute; inset: 0; z-index: 3; pointer-events: none;
   background:
     radial-gradient(120% 60% at 50% 110%, rgba(255, 200, 80, .95), rgba(255, 90, 20, .85) 35%, rgba(120, 20, 0, .6) 55%, transparent 70%);
   transform: translateY(100%); mix-blend-mode: screen;
-  animation: flame 1.6s ease-in var(--d, 0s) forwards;
+  animation: flame 1.6s ease-in calc(var(--d, 0s) - var(--t, 0ms)) forwards;
 }
 .sleeve.burning .stamp {
   position: absolute; inset: auto 0 45% 0; z-index: 4; text-align: center;
   font-family: var(--serif); font-weight: 800; font-size: 1.05rem; text-transform: uppercase; letter-spacing: .06em;
   color: var(--danger); background: rgba(0,0,0,.65); transform: rotate(-12deg) scale(0); padding: 4px 0;
   border-top: 2px solid var(--danger); border-bottom: 2px solid var(--danger);
-  animation: stamp .35s cubic-bezier(.2, 1.6, .4, 1) calc(var(--d, 0s) + 1.3s) forwards;
+  animation: stamp .35s cubic-bezier(.2, 1.6, .4, 1) calc(var(--d, 0s) + 1.3s - var(--t, 0ms)) forwards;
 }
 @keyframes flame {
   0% { transform: translateY(100%); opacity: 1; }
@@ -507,3 +508,6 @@ select { font: 1rem var(--sans); color: var(--cream); background: rgba(0,0,0,.35
 /* ── Жетон подвоєння ───────────────────── */
 .double-bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: center; margin: 0 0 16px; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--brass-dim); background: rgba(212,169,74,.1); }
 .double-bar.on { border-color: var(--ok); background: rgba(127,209,160,.12); color: var(--ok); font-weight: 800; }
+
+/* ── Магазин: готовність ───────────────── */
+.shop-ready { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: center; margin-top: 14px; }

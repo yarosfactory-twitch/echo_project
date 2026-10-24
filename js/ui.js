@@ -48,31 +48,35 @@ export function tableHTML({ players, phase, thrown, passed = new Set(), meUid = 
   const seatHTML = seats.map((p) => {
     const threw = showThrown && thrown.has(p.uid);
     const pass = showThrown && passed.has(p.uid);
-    // Карта летить у центр лише раз — у момент ходу, а не при кожному перемальовуванні.
-    const toss = threw && onceFresh(`toss-${round}-${p.uid}`, 900);
+    // Карта летить у центр лише раз — у момент ходу. patch() перемальовує стіл при кожній
+    // зміні, тож анімацію не перезапускаємо, а «продовжуємо» з того місця (від'ємна затримка).
+    const tossT = threw ? elapsed(`toss-${round}-${p.uid}`) : Infinity;
+    const toss = tossT < 800;
     return `<div class="seat ${p.status}${p.uid === meUid ? " me" : ""}">
       ${fanHTML(p.status === "active" ? cardsInHand(p, threw) : 0)}
       <div class="name">${esc(p.displayName)}${phase === "lobby" ? (p.ready ? " ✓" : "") : ""}</div>
       <div class="score">${p.status === "out" ? "вибув" : pass ? "пас" : `${p.score ?? 0} б.`}</div>
-      ${toss ? `<span class="sleeve back thrown"></span>` : ""}
+      ${toss ? `<span class="sleeve back thrown" style="animation-delay:-${tossT}ms"></span>` : ""}
     </div>`;
   }).join("");
   const pile = showThrown
     ? `<div class="pile">${[...thrown].map((uid, i) => {
-        const land = onceFresh(`land-${round}-${uid}`, 700) ? " land" : "";
-        return `<span class="sleeve back${land}" style="--r:${((i * 37) % 30) - 15}deg"></span>`;
+        const t = elapsed(`land-${round}-${uid}`);
+        const land = t < 450 ? ` land" style="animation-delay:-${t}ms;--r:${((i * 37) % 30) - 15}deg` : `" style="--r:${((i * 37) % 30) - 15}deg`;
+        return `<span class="sleeve back${land}"></span>`;
       }).join("")}</div>
        <div class="pile-label">${plural(thrown.size, CARDS)} у центрі${passed.size ? ` · пас: ${passed.size}` : ""}</div>`
     : "";
   return `<div class="felt-table"><div class="center-pile">${pile}</div>${seatHTML}</div>`;
 }
 
-// Чи подія «свіжа»: true протягом ms від першого виклику з цим ключем (для одноразових анімацій).
+// Скільки мс минуло від першої появи події з цим ключем (для одноразових анімацій,
+// що мають пережити перемальовування без перезапуску).
 const firstSeenAt = new Map();
-export function onceFresh(key, ms) {
+export function elapsed(key) {
   const now = Date.now();
   if (!firstSeenAt.has(key)) firstSeenAt.set(key, now);
-  return now - firstSeenAt.get(key) < ms;
+  return now - firstSeenAt.get(key);
 }
 
 /** Підсумок гри: зверху ті, хто дійшов до кінця, нижче вибулі.
@@ -103,7 +107,7 @@ export function originalityHTML(groups = []) {
     const label = g.type === "exact"
       ? "Той самий трек"
       : g.decision === "burn" ? "Ведучий: однакові" : g.decision === "keep" ? "Ведучий: різні, лишаються" : "Схожі назви · ведучий вирішує";
-    const cards = g.cards.map((c, i) => `<li class="sleeve face ${state}" style="--d:${i * 0.25}s">
+    const cards = g.cards.map((c, i) => `<li class="sleeve face ${state}" style="--d:${i * 0.25}s;--t:${state === "burning" ? elapsed(`burn-${c.uid}-${c.cardKey}`) : 0}ms">
         <span class="src">${sourceLabel(c.source)}</span><span class="title">${esc(c.title)}</span>
         <span class="author">${esc(c.displayName)}</span>
         ${state === "burning" ? `<span class="stamp">неоригінально</span>` : ""}</li>`).join("");
@@ -125,9 +129,8 @@ export const POINTS = ["бал", "бали", "балів"];
 // Переворот карти з сорочки на лицьовий бік: лише для щойно відкритої, один раз.
 // patch() перемальовує розмітку при кожній зміні (новий голос тощо), тож
 // пам'ятаємо, коли карту вперше побачили відкритою.
-const firstSeenOpen = new Map();
-export function flipClass(key) {
-  const now = Date.now();
-  if (!firstSeenOpen.has(key)) firstSeenOpen.set(key, now);
-  return now - firstSeenOpen.get(key) < 600 ? " flip" : "";
+/** → { cls, style }: клас flip і від'ємна затримка, щоб перемальовування не перезапускало переворот. */
+export function flipAttr(key) {
+  const t = elapsed(`flip-${key}`);
+  return t < 500 ? { cls: " flip", style: ` style="animation-delay:-${t}ms"` } : { cls: "", style: "" };
 }
