@@ -29,6 +29,10 @@
   <!-- Права колонка: керування, у кадр не потрапляє. -->
   <aside class="side-col">
     <div id="control"></div>
+    <div class="panel volume">
+      <label for="volume-range">Гучність треків <b id="volume-value">50%</b></label>
+      <input id="volume-range" type="range" min="0" max="100" step="5" value="50">
+    </div>
     <div id="seats"></div>
     <details open><summary>Журнал</summary><ul id="log" class="log"></ul></details>
   </aside>

@@ -40,6 +40,9 @@ const S = {
 const busy = new Set();
 // Оголошено тут, до boot(): boot() викликається одразу після входу, ще до решти модуля.
 let scApi = null; // проміс завантаження SoundCloud Widget API
+let volume = 50; // гучність треків, 0–100
+try { volume = Math.min(100, Math.max(0, Number(localStorage.getItem("mr_volume") ?? 50))); } catch { /* типове 50 */ }
+let currentSc = null; // віджет SoundCloud поточного треку
 const reel = new Reel(els.reel, { sound: true }); // звук обертання йде лише зі сторінки ведучого
 let landedSpin = null; // id обертання, яке вже зупинилось (до цього тему не показуємо)
 let gameSubs = [];
@@ -563,8 +566,41 @@ function updatePlayer() {
     ? `<iframe src="${esc(src)}" allow="autoplay; encrypted-media" allowfullscreen></iframe>
        <a class="link small" href="${esc(card.url)}" target="_blank" rel="noopener">Не грає? Відкрити в новій вкладці</a><span class="muted small">${from}</span>`
     : "";
-  if (card?.source === "soundcloud" && card.start) seekSoundCloud(els.player.querySelector("iframe"), card.start);
+  const iframe = els.player.querySelector("iframe");
+  if (!iframe) return;
+  if (card.source === "soundcloud") setupSoundCloud(iframe, card.start ?? 0);
+  else setupYouTube(iframe);
 }
+
+// ── Гучність ────────────────────────────────────────────────
+// Один повзунок для обох плеєрів. Значення — лише зручність цього браузера,
+// тож localStorage (з try/catch: у приватному вікні він може кидати помилку).
+
+function applyVolume() {
+  const iframe = els.player.querySelector("iframe");
+  if (!iframe) return;
+  if (currentSc) currentSc.setVolume(volume);
+  else ytCommand(iframe, "setVolume", [volume]);
+}
+
+function ytCommand(iframe, func, args = []) {
+  iframe.contentWindow?.postMessage(JSON.stringify({ event: "command", func, args }), "*");
+}
+
+/** YouTube приймає команди після готовності плеєра, тож повторюємо кілька разів. */
+function setupYouTube(iframe) {
+  currentSc = null;
+  const send = () => ytCommand(iframe, "setVolume", [volume]);
+  iframe.addEventListener("load", () => { [300, 1000, 2500, 5000].forEach((ms) => setTimeout(send, ms)); }, { once: true });
+}
+
+$("#volume-range")?.addEventListener("input", (e) => {
+  volume = Number(e.target.value);
+  $("#volume-value").textContent = `${volume}%`;
+  try { localStorage.setItem("mr_volume", String(volume)); } catch { /* не критично */ }
+  applyVolume();
+});
+if ($("#volume-range")) { $("#volume-range").value = volume; $("#volume-value").textContent = `${volume}%`; }
 
 // SoundCloud не приймає час старту в адресі плеєра, тож перемотуємо через Widget API.
 function loadSoundCloudApi() {
@@ -578,26 +614,34 @@ function loadSoundCloudApi() {
   return scApi;
 }
 
-/** Перемотка SoundCloud на таймкод. Подія READY могла вже пройти, поки
- *  вантажився api.js, тому перемотуємо також на першому PLAY і ще раз
- *  перевіряємо позицію через пару секунд. */
-async function seekSoundCloud(iframe, startSec) {
+/** SoundCloud: гучність і перемотка на таймкод. Подія READY могла вже пройти,
+ *  поки вантажився api.js, тому діємо також на першому PLAY і ще раз
+ *  перевіряємо через пару секунд. */
+async function setupSoundCloud(iframe, startSec) {
+  currentSc = null;
   try {
     const SC = await loadSoundCloudApi();
     const widget = SC.Widget(iframe);
+    currentSc = widget;
     const target = startSec * 1000;
     let done = false;
-    const seek = () => {
+    const fix = () => {
+      widget.setVolume(volume);
+      if (!target) { done = true; return; }
       widget.getPosition((pos) => {
         if (pos < target - 1500) widget.seekTo(target);
         done = true;
       });
     };
-    widget.bind(SC.Widget.Events.READY, () => { widget.seekTo(target); widget.play(); });
-    widget.bind(SC.Widget.Events.PLAY, () => { if (!done) seek(); });
-    setTimeout(seek, 2500);
+    widget.bind(SC.Widget.Events.READY, () => {
+      widget.setVolume(volume);
+      if (target) widget.seekTo(target);
+      widget.play();
+    });
+    widget.bind(SC.Widget.Events.PLAY, () => { if (!done) fix(); });
+    setTimeout(fix, 2500);
   } catch (e) {
-    log(`⚠ ${e.message}: трек грає з початку`);
+    log(`⚠ ${e.message}: гучність і таймкод SoundCloud не застосуються`);
   }
 }
 

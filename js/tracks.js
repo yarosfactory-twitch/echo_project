@@ -159,7 +159,8 @@ async function resolveSoundCloud(url) {
 export function embedUrl(card) {
   if (card.source === "youtube") {
     const start = card.start ? `&start=${Math.floor(card.start)}` : "";
-    return `https://www.youtube.com/embed/${card.id}?autoplay=1&rel=0${start}`;
+    // enablejsapi=1: щоб ведучий міг керувати гучністю через postMessage.
+    return `https://www.youtube.com/embed/${card.id}?autoplay=1&rel=0&enablejsapi=1${start}`;
   }
   if (!card.id && card.embed) {
     const u = new URL(card.embed);

@@ -404,3 +404,9 @@ summary { cursor: pointer; color: var(--muted); }
 
 .sleeve .src .start { color: var(--brass); font-weight: 700; letter-spacing: .04em; }
 .player .muted.small { margin-left: 8px; }
+
+/* ── Гучність ──────────────────────────── */
+.side-col .panel.volume { margin: 12px 0; padding: 12px 16px; }
+.volume label { display: flex; justify-content: space-between; margin: 0 0 6px; color: var(--muted); }
+.volume b { color: var(--brass); }
+.volume input[type=range] { width: 100%; padding: 0; border: 0; background: transparent; accent-color: var(--brass); }
