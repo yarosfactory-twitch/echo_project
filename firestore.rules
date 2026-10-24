@@ -1,6 +1,6 @@
 rules_version = '2';
 
-// Правила для echo_project (тариф Spark).
+// Правила для Music Roulette (тариф Spark).
 // UID ведучого вписаний у isHost(). Після змін опублікуй правила:
 // Firebase Console → Firestore Database → Rules.
 service cloud.firestore {
