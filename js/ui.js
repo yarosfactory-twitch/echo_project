@@ -64,3 +64,11 @@ export function originalityHTML(groups = []) {
   return `<div class="originality"><h2 class="dup-title">Неоригінально!</h2>
     <p class="muted center">Однакові треки згоряють у всіх, у кого вони є</p>${groups.map(block).join("")}</div>`;
 }
+
+/** Українська множина: plural(1, ["карта","карти","карт"]) → "1 карта". */
+export function plural(n, [one, few, many]) {
+  const m10 = n % 10, m100 = n % 100;
+  const word = m10 === 1 && m100 !== 11 ? one : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? few : many;
+  return `${n} ${word}`;
+}
+export const CARDS = ["карта", "карти", "карт"];

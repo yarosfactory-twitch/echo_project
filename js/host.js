@@ -18,7 +18,7 @@ import { Reel, SPIN_MS } from "./reel.js";
 import {
   PHASE, PHASE_LABEL, MODE_LABEL, deckSize, shuffle, pickRandom, standings, leadersTie, DEFAULT_THEMES,
 } from "./game-logic.js";
-import { $, esc, patch, fmtCountdown, sourceLabel, podiumHTML, originalityHTML } from "./ui.js";
+import { $, esc, patch, fmtCountdown, sourceLabel, podiumHTML, originalityHTML, plural, CARDS } from "./ui.js";
 
 const els = {
   auth: $("#auth"), control: $("#control"), stage: $("#stage"), reel: $("#reel"),
@@ -702,7 +702,7 @@ function viewSeats() {
   const rows = S.players.slice().sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).map((p) => `<li class="${p.status}">
       ${p.avatar ? `<img src="${esc(p.avatar)}" alt="">` : ""}
       <span class="name">${esc(p.displayName)}</span>
-      <span class="muted small">${S.game.phase === PHASE.LOBBY ? `${p.cardCount}/${deckSize(S.game.settings)} ${p.ready ? "✓ готовий" : ""}` : p.status === "out" ? "вибув" : `${p.cardCount} карт${S.game.phase === PHASE.DISCARD && thrown.has(p.uid) ? " · кинув" : ""}`}</span>
+      <span class="muted small">${S.game.phase === PHASE.LOBBY ? `${p.cardCount}/${deckSize(S.game.settings)} ${p.ready ? "✓ готовий" : ""}` : p.status === "out" ? "вибув" : S.game.phase === PHASE.DISCARD && thrown.has(p.uid) ? `${plural(Math.max(0, (p.cardCount ?? 0) - 1), CARDS)} · кинув` : plural(p.cardCount ?? 0, CARDS)}</span>
       <span class="score">${p.score ?? 0}</span>
       ${p.status === "active" ? `<button class="x" data-action="kick" data-arg="${esc(p.uid)}" title="Кікнути">×</button>` : ""}
     </li>`).join("");

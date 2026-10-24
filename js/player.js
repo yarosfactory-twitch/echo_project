@@ -7,7 +7,7 @@ import { resolveTrack, TrackError } from "./tracks.js";
 import { PHASE, PHASE_LABEL, deckSize } from "./game-logic.js";
 import { MAX_PLAYERS } from "./config.js";
 import { Reel } from "./reel.js";
-import { $, esc, patch, fmtCountdown, sourceLabel, fanHTML, podiumHTML, originalityHTML } from "./ui.js";
+import { $, esc, patch, fmtCountdown, sourceLabel, fanHTML, podiumHTML, originalityHTML, plural, CARDS } from "./ui.js";
 
 const els = { me: $("#me"), status: $("#status"), main: $("#main"), table: $("#table") };
 
@@ -307,13 +307,17 @@ function viewTable() {
   const thrown = new Set(S.round?.thrown ?? []);
   const showThrown = S.game.phase === PHASE.DISCARD;
   const seatHTML = seats.map((p) => `<div class="seat ${p.status}${p.uid === S.uid ? " me" : ""}">
-      ${fanHTML(p.status === "active" ? p.cardCount ?? 0 : 0)}
+      ${fanHTML(p.status === "active" ? cardsInHand(p, showThrown && thrown.has(p.uid)) : 0)}
       <div class="name">${esc(p.displayName)}${S.game.phase === PHASE.LOBBY ? (p.ready ? " ✓" : "") : ""}</div>
       <div class="score">${p.status === "out" ? "вибув" : `${p.score ?? 0} б.`}</div>
       ${showThrown && thrown.has(p.uid) ? `<span class="sleeve back thrown"></span>` : ""}
     </div>`).join("");
-  return `<div class="felt-table"><div class="center-pile">${showThrown ? `${thrown.size} карт у центрі` : ""}</div>${seatHTML}</div>`;
+  return `<div class="felt-table"><div class="center-pile">${showThrown ? `${plural(thrown.size, CARDS)} у центрі` : ""}</div>${seatHTML}</div>`;
 }
+
+/** cardCount оновлюється лише після закриття скидання, тому кинуту карту
+ *  віднімаємо одразу, щоб вона не «висіла» в руці. */
+const cardsInHand = (p, threwThisRound) => Math.max(0, (p.cardCount ?? 0) - (threwThisRound ? 1 : 0));
 
 function syncReel() {
   const g = S.game;
