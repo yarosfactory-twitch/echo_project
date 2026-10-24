@@ -233,8 +233,10 @@ summary { cursor: pointer; color: var(--muted); }
   .host-layout { grid-template-columns: 1fr; }
   .topbar { padding: 12px 16px; }
 }
+/* «Зменшити рух» (macOS/iOS/Windows): прибираємо декоративні анімації, але НЕ барабан
+   тем і платівку — їхнє обертання і є механікою гри (інакше вони миттєво стрибають на результат). */
 @media (prefers-reduced-motion: reduce) {
-  *, *::after { animation: none !important; transition: none !important; }
+  *:not(.reel-track):not(.wheel-disc), *::after { animation: none !important; transition: none !important; }
 }
 
 /* ── Неоригінальні треки ───────────────── */
