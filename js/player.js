@@ -23,6 +23,7 @@ let roundSubs = [];
 let roundKey = null;
 
 const gref = (...path) => doc(db, "games", S.gameId, ...path);
+const isClassic = () => S.game?.settings?.mode !== "hardcore";
 
 // ── Підписки ────────────────────────────────────────────────
 S.uid = (await ensureAnonUser()).uid;
@@ -89,6 +90,7 @@ const actions = {
   join: () => startLogin(),
   async removeCard(key) {
     const cards = S.deck.filter((c) => c.key !== key);
+    if (isClassic()) await deleteDoc(gref("tracks", key)).catch(() => {});
     await setDoc(gref("decks", S.uid), { cards });
     await updateDoc(gref("players", S.uid), { cardCount: cards.length, ready: false });
   },
@@ -118,9 +120,18 @@ async function addCard(url) {
   try {
     const track = await resolveTrack(url);
     if (S.deck.some((c) => c.key === track.key)) throw new TrackError("Цей трек уже є у твоїй колоді");
-    // Збіги з іншими гравцями тут не перевіряємо: про них дізнаються на старті гри.
-    // Треки, які вже згоріли як неоригінальні, додати знову не можна.
-    if ((S.game.burned ?? []).includes(track.key)) throw new TrackError("Цей трек уже згорів у цій грі як неоригінальний");
+    if (isClassic()) {
+      // Класичний режим: реєстр tracks/{key} можна лише створити. Якщо трек
+      // уже взяв інший гравець, правила відмовлять, і ми просимо інший.
+      try {
+        await setDoc(gref("tracks", track.key), { uid: S.uid });
+      } catch {
+        throw new TrackError("Цей трек уже взяв інший гравець, обери інший");
+      }
+    } else if ((S.game.burned ?? []).includes(track.key)) {
+      // Хардкор: про збіги дізнаються на старті. Згорілий трек повторно не додати.
+      throw new TrackError("Цей трек уже згорів у цій грі як неоригінальний");
+    }
     const cards = [...S.deck, { ...track, used: false }];
     await setDoc(gref("decks", S.uid), { cards });
     await updateDoc(gref("players", S.uid), { cardCount: cards.length, ready: false });
@@ -213,7 +224,9 @@ function viewDeckBuilder() {
   return `<section class="panel">
     <h2>Твоя колода <span class="muted">${deck.length} / ${need}</span></h2>
     <p class="muted">Теми невідомі заздалегідь, тож бери різні треки. YouTube або SoundCloud.</p>
-    <p class="muted small">Якщо такий самий трек принесе ще хтось, на старті гри він згорить в обох. Ризикуєш, коли береш очевидні хіти.</p>
+    <p class="muted small">${isClassic()
+      ? "Класичний режим: якщо трек уже взяв інший гравець, сайт попросить обрати інший."
+      : "Хардкор: якщо такий самий трек принесе ще хтось, на старті гри він згорить в обох. Ризикуєш, коли береш очевидні хіти."}</p>
     <form id="add-form" class="add">
       <input id="track-url" type="url" placeholder="Посилання на трек" ${full || S.busy ? "disabled" : ""} autocomplete="off">
       <button class="btn" ${full || S.busy ? "disabled" : ""}>${S.busy ? "Перевіряю…" : "Додати"}</button>

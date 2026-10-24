@@ -39,6 +39,8 @@ export const DEFAULT_SETTINGS = {
   discardSeconds: 90,
   voteSeconds: 60,
   tiebreakSeconds: 180,
+  // "classic": дублікат видно одразу в лобі; "hardcore": однакові треки згоряють на старті.
+  mode: "classic",
   // Ціни магазину у % від балів гравця (мінімум 1 бал).
   prices: { queue: 10, swap: 15, extraCard: 20, double: 25, respin: 25 },
 };

@@ -26,6 +26,8 @@ export const PHASE_LABEL = {
   final: "Фінал",
 };
 
+export const MODE_LABEL = { classic: "класичний", hardcore: "хардкор" };
+
 export const deckSize = (settings) => settings.rounds + settings.extraCards;
 
 export function shuffle(items, rnd = Math.random) {

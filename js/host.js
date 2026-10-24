@@ -3,7 +3,7 @@
 import {
   db, waitForUser, signInHost, signOut, auth,
   doc, collection, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot,
-  writeBatch, serverTimestamp, deleteField, increment, arrayUnion,
+  query, where, writeBatch, serverTimestamp, deleteField, increment, arrayUnion,
 } from "./firebase.js";
 import {
   HOST_UID, TWITCH_CLIENT_ID, TWITCH_CHANNEL, MIN_PLAYERS, MAX_PLAYERS,
@@ -15,7 +15,7 @@ import { VoteCollector } from "./votes.js";
 import { findDuplicateGroups, burnPlan, burnedKeys } from "./originality.js";
 import { connectChat } from "./chat.js";
 import {
-  PHASE, PHASE_LABEL, deckSize, shuffle, pickRandom, standings, leadersTie, DEFAULT_THEMES,
+  PHASE, PHASE_LABEL, MODE_LABEL, deckSize, shuffle, pickRandom, standings, leadersTie, DEFAULT_THEMES,
 } from "./game-logic.js";
 import { $, esc, patch, fmtCountdown, sourceLabel, podiumHTML, originalityHTML } from "./ui.js";
 
@@ -28,6 +28,13 @@ const S = {
   user: null, gameId: undefined, game: null, players: [], requests: [],
   round: null, moves: [], secret: null, themesPool: null,
   collector: null, chat: "off", logLines: [],
+  // Чернетка форми «Нова гра». Тримаємо значення тут, бо перемальовування
+  // панелі (patch) інакше скидає поля до значень за замовчуванням.
+  form: {
+    rounds: DEFAULT_SETTINGS.rounds, extraCards: DEFAULT_SETTINGS.extraCards,
+    discardSeconds: DEFAULT_SETTINGS.discardSeconds, voteSeconds: DEFAULT_SETTINGS.voteSeconds,
+    mode: DEFAULT_SETTINGS.mode, custom: "", pool: null,
+  },
 };
 const busy = new Set();
 let gameSubs = [];
@@ -152,21 +159,23 @@ const A = {
   signOut: async () => { await signOut(auth); location.reload(); },
 
   savePool: () => once("savePool", async () => {
-    const list = lines($("#pool-text").value);
+    const list = lines(S.form.pool ?? (S.themesPool ?? DEFAULT_THEMES).join("\n"));
     await setDoc(doc(db, "themes", "pool"), { list });
     log(`Пул тем збережено: ${list.length}`);
   }),
 
   createGame: () => once("createGame", async () => {
-    const num = (id, min, max) => Math.min(max, Math.max(min, Number($(id).value) || min));
+    const f = S.form;
+    const num = (v, min, max) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : min; };
     const settings = {
       ...DEFAULT_SETTINGS,
-      rounds: num("#set-rounds", 1, 20),
-      extraCards: num("#set-extra", 0, 10),
-      discardSeconds: num("#set-discard", 15, 600),
-      voteSeconds: num("#set-vote", 10, 600),
+      rounds: num(f.rounds, 1, 20),
+      extraCards: num(f.extraCards, 0, 10),
+      discardSeconds: num(f.discardSeconds, 15, 600),
+      voteSeconds: num(f.voteSeconds, 10, 600),
+      mode: f.mode === "hardcore" ? "hardcore" : "classic",
     };
-    const themes = [...new Set([...(S.themesPool ?? DEFAULT_THEMES), ...lines($("#custom-themes").value)])];
+    const themes = [...new Set([...(S.themesPool ?? DEFAULT_THEMES), ...lines(f.custom)])];
     const gameRef = doc(collection(db, "games"));
     await setDoc(gameRef, {
       phase: PHASE.LOBBY, round: 0, settings, themesLeft: themes, theme: null,
@@ -174,7 +183,7 @@ const A = {
       originality: null, burned: [], createdAt: serverTimestamp(),
     });
     await setDoc(doc(db, "meta", "active"), { gameId: gameRef.id });
-    log("Лобі відкрито");
+    log(`Лобі відкрито: ${settings.rounds} раундів, ${deckSize(settings)} карт, ${MODE_LABEL[settings.mode]}`);
   }),
 
   closeGame: () => once("closeGame", async () => {
@@ -187,6 +196,8 @@ const A = {
     if (!p || !confirm(`Кікнути ${p.displayName}?`)) return;
     if (S.game.phase === PHASE.LOBBY) {
       const batch = writeBatch(db);
+      const tracks = await getDocs(query(gcol("tracks"), where("uid", "==", uid)));
+      tracks.forEach((t) => batch.delete(t.ref));
       batch.delete(gref("decks", uid));
       batch.delete(gref("players", uid));
       await batch.commit();
@@ -198,6 +209,12 @@ const A = {
 
   startGame: () => once("startGame", async () => {
     if (!canStart()) return;
+    if (S.game.settings.mode !== "hardcore") {
+      // Класичний режим: дублікати не пускає вже лобі, перевірка не потрібна.
+      await updateDoc(gref(), { phase: PHASE.SPIN, round: 1, theme: null, originality: null });
+      log("Гра почалась");
+      return;
+    }
     const decks = await Promise.all(activePlayers().map(async (p) => ({
       uid: p.uid, displayName: p.displayName,
       cards: (await getDoc(gref("decks", p.uid))).data()?.cards ?? [],
@@ -446,6 +463,19 @@ setInterval(() => {
 
 const lines = (text) => text.split("\n").map((t) => t.trim()).filter(Boolean);
 
+// Поля форми пишуть у S.form одразу при введенні.
+document.addEventListener("input", (e) => {
+  const field = e.target.dataset?.field;
+  if (!field || !(field in S.form)) return;
+  S.form[field] = e.target.value;
+  if (field === "mode") render(); // радіо: фокус втратити не страшно
+  if (field === "rounds" || field === "extraCards") {
+    // Не перемальовуємо, щоб не збити фокус у полі, що редагується.
+    const el = $("#deck-count");
+    if (el) el.textContent = deckSize({ rounds: Number(S.form.rounds) || 0, extraCards: Number(S.form.extraCards) || 0 });
+  }
+});
+
 document.addEventListener("click", (e) => {
   const btn = e.target.closest("[data-action]");
   if (!btn || btn.disabled) return;
@@ -495,19 +525,27 @@ function viewControl() {
     `<button class="btn ${opts.primary ? "primary" : ""}" data-action="${action}" ${opts.arg != null ? `data-arg="${esc(opts.arg)}"` : ""} ${opts.disabled || busy.has(action) ? "disabled" : ""}>${label}</button>`;
 
   if (S.gameId === null) {
-    const s = DEFAULT_SETTINGS;
-    const pool = (S.themesPool ?? DEFAULT_THEMES).join("\n");
+    const f = S.form;
+    const pool = f.pool ?? (S.themesPool ?? DEFAULT_THEMES).join("\n");
+    const radio = (value, title, hint) => `<label class="mode ${f.mode === value ? "on" : ""}">
+        <input type="radio" name="mode" data-field="mode" value="${value}" ${f.mode === value ? "checked" : ""}>
+        <span><b>${title}</b><span class="muted small">${hint}</span></span></label>`;
     return `<section class="panel"><h2>Нова гра</h2>
       <div class="grid">
-        <label>Раундів <input id="set-rounds" type="number" value="${s.rounds}" min="1" max="20"></label>
-        <label>Додаткових карт <input id="set-extra" type="number" value="${s.extraCards}" min="0" max="10"></label>
-        <label>Скидання, с <input id="set-discard" type="number" value="${s.discardSeconds}" min="15"></label>
-        <label>Голосування, с <input id="set-vote" type="number" value="${s.voteSeconds}" min="10"></label>
+        <label>Раундів <input data-field="rounds" type="number" value="${esc(f.rounds)}" min="1" max="20"></label>
+        <label>Додаткових карт <input data-field="extraCards" type="number" value="${esc(f.extraCards)}" min="0" max="10"></label>
+        <label>Скидання, с <input data-field="discardSeconds" type="number" value="${esc(f.discardSeconds)}" min="15"></label>
+        <label>Голосування, с <input data-field="voteSeconds" type="number" value="${esc(f.voteSeconds)}" min="10"></label>
       </div>
-      <label>Свої теми на цю гру (по одній у рядку)<textarea id="custom-themes" rows="3"></textarea></label>
+      <p class="muted small">Карт у колоді: <b id="deck-count">${deckSize({ rounds: Number(f.rounds) || 0, extraCards: Number(f.extraCards) || 0 })}</b></p>
+      <fieldset class="modes"><legend>Однакові треки</legend>
+        ${radio("classic", "Класичний", "Сайт одразу каже, що трек уже взяв інший гравець, і просить інший")}
+        ${radio("hardcore", "Хардкор", "Ніхто не знає про збіги, на старті однакові треки згоряють у всіх")}
+      </fieldset>
+      <label>Свої теми на цю гру (по одній у рядку)<textarea data-field="custom" rows="3">${esc(f.custom)}</textarea></label>
       ${b("createGame", "Відкрити лобі", { primary: true })}
       <details><summary>Постійний пул тем (${(S.themesPool ?? DEFAULT_THEMES).length})</summary>
-        <textarea id="pool-text" rows="10">${esc(pool)}</textarea>${b("savePool", "Зберегти пул")}</details>
+        <textarea data-field="pool" rows="10">${esc(pool)}</textarea>${b("savePool", "Зберегти пул")}</details>
     </section>`;
   }
   if (!S.game) return "";
@@ -518,6 +556,7 @@ function viewControl() {
     case PHASE.LOBBY: {
       const ps = activePlayers();
       body = `<p class="muted">Гравців: ${ps.length} / ${MAX_PLAYERS} · готові: ${ps.filter((p) => p.ready).length}</p>
+        <p class="muted small">${g.settings.rounds} раундів · ${deckSize(g.settings)} карт · режим: ${MODE_LABEL[g.settings.mode === "hardcore" ? "hardcore" : "classic"]}</p>
         ${b("startGame", "Почати гру", { primary: true, disabled: !canStart() })}`;
       break;
     }

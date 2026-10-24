@@ -305,3 +305,11 @@ summary { cursor: pointer; color: var(--muted); }
 
 .decide { padding: 10px 0; border-bottom: 1px solid rgba(212,169,74,.15); }
 .decide .row { margin: 6px 0 0; }
+
+/* ── Вибір режиму ──────────────────────── */
+.modes { border: 1px solid rgba(212,169,74,.3); border-radius: 8px; padding: 8px 12px 4px; margin: 4px 0 14px; }
+.modes legend { color: var(--muted); font-size: .9rem; padding: 0 6px; }
+.mode { display: flex; gap: 10px; align-items: flex-start; padding: 8px; border-radius: 6px; cursor: pointer; color: var(--cream); margin: 0 0 4px; }
+.mode.on { background: rgba(212,169,74,.12); }
+.mode input { width: auto; margin-top: 4px; accent-color: var(--brass); }
+.mode > span { display: flex; flex-direction: column; }
