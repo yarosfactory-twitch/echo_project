@@ -57,6 +57,19 @@ let gameSubs = [];
 let roundSubs = [];
 let roundKey = null;
 
+// Анімувати обертання чи одразу показати результат. Порівнювати час з годинником
+// ведучого ненадійно: якщо годинник цього комп'ютера відстає/поспішає на кілька
+// секунд, барабан одразу стрибав на результат. Тому: якщо сторінка була відкрита й
+// побачила, як обертання почалось, — завжди анімуємо; годинник — лише для тих, хто
+// відкрив сторінку вже після старту.
+const liveSpins = new Set();
+function markLive(prev, next) {
+  if (!prev || !next) return; // перший знімок після відкриття сторінки — не «наживо»
+  if (next.spin?.id && next.spin.id !== prev.spin?.id) liveSpins.add(next.spin.id);
+  if (next.wheel?.id && next.wheel.id !== prev.wheel?.id) liveSpins.add(next.wheel.id);
+}
+const isFresh = (x) => liveSpins.has(x.id) || Date.now() - (x.at ?? 0) < x.ms + 1500;
+
 const gref = (...path) => doc(db, "games", S.gameId, ...path);
 const gcol = (...path) => collection(db, "games", S.gameId, ...path);
 const activePlayers = () => S.players.filter((p) => p.status === "active");
@@ -99,7 +112,7 @@ function subscribeGame(id) {
   render();
   if (!id) return;
   gameSubs.push(
-    onSnapshot(gref(), (s) => { S.game = s.data() ?? null; syncRound(); resumeVoting(); onMovesChanged(); applySiteVotes(); render(); }),
+    onSnapshot(gref(), (s) => { const next = s.data() ?? null; markLive(S.game, next); S.game = next; syncRound(); resumeVoting(); onMovesChanged(); applySiteVotes(); render(); }),
     onSnapshot(gcol("players"), (s) => {
       S.players = s.docs.map((d) => ({ uid: d.id, ...d.data() }));
       for (const p of S.players) justSeated.delete(p.uid);
@@ -525,7 +538,7 @@ function syncReel() {
   const g = S.game;
   if (!g || g.phase !== PHASE.SPIN) { reel.hide(); return; }
   if (!spunThisRound()) { reel.idle(g.themesLeft ?? []); return; }
-  const fresh = Date.now() - (g.spin.at ?? 0) < g.spin.ms + 1500;
+  const fresh = isFresh(g.spin);
   reel.spin(g.spin, fresh, () => {
     landedSpin = g.spin.id;
     landedSpinAt = fresh ? Date.now() : (g.spin.at ?? 0) + g.spin.ms;
@@ -543,7 +556,7 @@ function syncWheel() {
     wheel.idle(players);
     return;
   }
-  const fresh = Date.now() - (g.wheel.at ?? 0) < g.wheel.ms + 1500;
+  const fresh = isFresh(g.wheel);
   wheel.spin(g.wheel, fresh, () => { landedWheel = g.wheel.id; render(); });
 }
 
