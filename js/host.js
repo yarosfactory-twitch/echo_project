@@ -676,7 +676,7 @@ function viewControl() {
 }
 
 function viewStage() {
-  if (!S.game) return `<div class="stage-empty"><h1 class="logo big">echo<span>_</span>project</h1></div>`;
+  if (!S.game) return `<div class="stage-empty"><img class="logo-big" src="img/logo.png" alt="Music Roulette"></div>`;
   const g = S.game;
   if (g.phase === PHASE.FINAL) return `<div class="stage-final">${podiumHTML(g.final)}</div>`;
   if (g.phase === PHASE.ORIGINALITY) return originalityHTML(g.originality?.groups);

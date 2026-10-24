@@ -59,6 +59,8 @@ code { background: rgba(0,0,0,.35); padding: .1em .4em; border-radius: 4px; }
 .logo { font-family: var(--serif); font-weight: 800; font-size: 1.5rem; color: var(--cream); text-decoration: none; letter-spacing: .02em; }
 .logo span { color: var(--brass); }
 .logo.big { font-size: clamp(2.5rem, 7vw, 5rem); }
+.logo img { display: block; height: 50px; width: auto; }
+.logo-big { width: min(640px, 80%); height: auto; filter: drop-shadow(0 10px 30px rgba(0,0,0,.45)); }
 .topbar > div { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 
 .chip { display: inline-block; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--brass-dim); background: rgba(0,0,0,.3); font-size: .9rem; }
