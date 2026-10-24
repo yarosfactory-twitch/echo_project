@@ -74,6 +74,18 @@ service cloud.firestore {
             && request.resource.data.cardKey is string;
           allow delete: if isHost();
         }
+
+        // Голос гравця із сайту. Будь-який гравець гри (і вибулий) голосує лише за себе;
+        // що він не голосує за свій трек, перевіряє ведучий (знає авторів).
+        match /votes/{uid} {
+          allow read: if isHost() || isSelf(uid);
+          allow create, update: if isSelf(uid) && exists(playerDoc(g))
+            && game(g).phase == 'vote' && string(game(g).round) == n
+            && request.resource.data.keys().hasOnly(['slot', 'at'])
+            && request.resource.data.slot is int
+            && request.resource.data.slot >= 1;
+          allow delete: if isHost();
+        }
       }
 
       // Хто який трек скинув, до розкриття знає лише ведучий.

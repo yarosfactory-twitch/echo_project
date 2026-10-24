@@ -14,7 +14,7 @@ const els = { me: $("#me"), status: $("#status"), main: $("#main"), table: $("#t
 const S = {
   uid: null, gameId: undefined, game: null, players: [], me: null, // undefined = ще не знаємо
   request: undefined, // undefined = ще не знаємо, null = заявки немає
-  deck: null, round: null, move: null,
+  deck: null, round: null, move: null, myVote: null,
   busy: false, error: "", selected: null,
 };
 
@@ -64,13 +64,16 @@ function syncRound() {
   const key = `${S.gameId}/${n}`;
   if (key === roundKey) return;
   roundSubs.forEach((off) => off());
-  roundSubs = []; roundKey = key; S.round = null; S.move = null; S.selected = null;
+  roundSubs = []; roundKey = key; S.round = null; S.move = null; S.selected = null; S.myVote = null;
   if (!n) return;
   roundSubs.push(
     onSnapshot(gref("rounds", String(n)), (s) => { S.round = s.data() ?? null; render(); }),
     onSnapshot(gref("rounds", String(n), "moves", S.uid),
       (s) => { S.move = s.data() ?? null; render(); },
       () => { S.move = null; }),
+    onSnapshot(gref("rounds", String(n), "votes", S.uid),
+      (s) => { S.myVote = s.data()?.slot ?? null; render(); },
+      () => { S.myVote = null; }),
   );
 }
 
@@ -104,6 +107,12 @@ const actions = {
   },
   select(key) { S.selected = key; render(); },
   async discard() { await sendMove("discard"); },
+  async vote(slot) {
+    const n = Number(slot);
+    if (S.game.phase !== PHASE.VOTE || !S.me || isMine(playBySlot(n))) return;
+    S.myVote = n; render(); // одразу показуємо вибір, не чекаючи бази
+    await setDoc(gref("rounds", String(S.game.round), "votes", S.uid), { slot: n, at: serverTimestamp() });
+  },
   async pass() { await sendMove("pass"); },
   async leave() {
     const inLobby = S.game.phase === PHASE.LOBBY;
@@ -281,18 +290,35 @@ function viewHand() {
   </section>`;
 }
 
+const playBySlot = (slot) => (S.round?.plays ?? []).find((p) => p.slot === slot);
+
+/** Чи це мій трек: та сама зіграна карта з моєї колоди. Автори приховані до кінця
+ *  голосування, але свою карту гравець і так знає. */
+function isMine(play) {
+  if (!play) return false;
+  return (S.deck ?? []).some((c) => c.used && !c.burned && (c.url === play.url || (c.id && c.id === play.id && c.source === play.source)));
+}
+
 function viewRound() {
   const plays = S.round?.plays ?? [];
   if (!plays.length) return "";
   const revealed = new Set(S.game.revealed ?? []);
+  const voting = S.game.phase === PHASE.VOTE && !!S.me; // голосувати на сайті можуть гравці (і вибулі)
   const items = plays.map((p) => {
     const open = revealed.has(p.slot) || S.round.revealed;
     const playing = S.game.nowPlaying === p.slot ? " playing" : "";
     const author = S.round.revealed ? `<span class="author">${esc(p.displayName)} · ${p.votes ?? 0} гол.</span>` : "";
-    return `<li class="sleeve ${open ? "face" : "back"}${playing}"><span class="num">${p.slot}</span>
-      ${open ? `<span class="title">${esc(p.title)}</span>` : ""}${author}</li>`;
+    const mine = voting && isMine(p);
+    const chosen = voting && S.myVote === p.slot;
+    const click = voting && !mine ? ` data-action="vote" data-arg="${p.slot}" title="Проголосувати за №${p.slot}"` : "";
+    const badge = mine ? `<span class="vote-badge mine">твій трек</span>` : chosen ? `<span class="vote-badge">твій голос</span>` : "";
+    return `<li class="sleeve ${open ? "face" : "back"}${playing}${click ? " votable" : ""}${chosen ? " voted" : ""}${mine ? " mine" : ""}"${click}><span class="num">${p.slot}</span>
+      ${open ? `<span class="title">${esc(p.title)}</span>` : ""}${author}${badge}</li>`;
   }).join("");
-  const hint = S.game.phase === PHASE.VOTE ? `<p class="hint">Пиши в чат номер треку, який сподобався найбільше</p>` : "";
+  const hint = S.game.phase !== PHASE.VOTE ? ""
+    : voting
+      ? `<p class="hint">Натисни на трек, який сподобався найбільше. Можна передумати: рахується останній голос, тут або в чаті</p>`
+      : `<p class="hint">Пиши в чат номер треку, який сподобався найбільше</p>`;
   return `<section class="panel"><h2>Треки раунду</h2>${hint}<ul class="deck plays">${items}</ul></section>`;
 }
 

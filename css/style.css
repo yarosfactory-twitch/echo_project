@@ -435,3 +435,15 @@ summary { cursor: pointer; color: var(--muted); }
 .stage-table .felt-table { min-height: 360px; align-content: center; gap: 36px 56px; }
 .stage-table .fan { transform: scale(1.3); margin-bottom: 18px; }
 .stage-table .seat .name { font-size: 1.15rem; }
+
+/* ── Голосування на сайті ──────────────── */
+.sleeve.votable { cursor: pointer; transition: transform .15s, box-shadow .15s; }
+.sleeve.votable:hover { transform: translateY(-4px); box-shadow: 0 0 0 2px var(--brass-dim), 0 12px 22px rgba(0,0,0,.5); }
+.sleeve.voted { box-shadow: 0 0 0 3px var(--ok), 0 0 26px rgba(127,209,160,.45); transform: translateY(-4px); }
+.sleeve.mine { opacity: .55; cursor: not-allowed; }
+.vote-badge {
+  position: absolute; top: 10px; right: 10px; z-index: 3; padding: 3px 8px; border-radius: 999px;
+  font-size: .72rem; font-weight: 800; text-transform: uppercase; letter-spacing: .06em;
+  background: var(--ok); color: var(--ink);
+}
+.vote-badge.mine { background: rgba(0,0,0,.6); color: var(--cream); }

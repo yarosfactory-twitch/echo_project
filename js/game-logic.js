@@ -20,7 +20,7 @@ export const PHASE_LABEL = {
   spin: "Барабан тем",
   discard: "Скидаємо карти",
   listen: "Слухаємо треки",
-  vote: "Голосування в чаті",
+  vote: "Голосування",
   results: "Підсумки раунду",
   tiebreak: "Тай-брейк",
   final: "Фінал",

@@ -137,3 +137,15 @@ test("Вибір теми рівномірний: за 22 000 спроб кож�
   const r = cryptoRandom();
   assert.ok(r >= 0 && r < 1);
 });
+
+test("Голос із сайту: за свій не можна, останній голос перемагає разом із чатом", () => {
+  const c = new VoteCollector({ trackCount: 3, slotAuthors: { 1: "alice", 2: "bob" }, bots: [] });
+  c.open = true;
+  assert.equal(c.handleSlot("alice", 1), false, "за свій трек");
+  assert.equal(c.handleSlot("alice", 2), true);
+  c.handle("alice", "3");             // потім написала в чат — рахується 3
+  assert.equal(c.handleSlot("bob", 9), false, "поза межами");
+  c.handleSlot("bob", 3);
+  c.handleSlot("Bob", 1);             // передумав на сайті
+  assert.deepEqual(c.tally(), { 1: 1, 2: 0, 3: 1 });
+});

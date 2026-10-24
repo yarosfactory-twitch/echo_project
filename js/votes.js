@@ -42,6 +42,18 @@ export class VoteCollector {
     return true;
   }
 
+  /** Голос із сайту (гравець натиснув на трек). Ті самі правила, що й для чату:
+   *  останній голос перемагає, за свій трек не можна. */
+  handleSlot(login, slot) {
+    if (!this.open || !login) return false;
+    const who = login.toLowerCase();
+    const n = Number(slot);
+    if (!Number.isInteger(n) || n < 1 || n > this.trackCount) return false;
+    if (this.slotAuthors[n] === who) return false;
+    this.votes.set(who, n);
+    return true;
+  }
+
   get voterCount() { return this.votes.size; }
 
   /** → { [slot]: кількість голосів } для всіх треків, включно з нулями */

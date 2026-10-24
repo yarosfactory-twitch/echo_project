@@ -28,7 +28,7 @@ const els = {
 const S = {
   user: null, gameId: undefined, game: null, players: [], requests: [],
   round: null, moves: [], secret: null, themesPool: null,
-  collector: null, chat: "off", logLines: [],
+  collector: null, chat: "off", logLines: [], siteVotes: [],
   // Чернетка форми «Нова гра». Тримаємо значення тут, бо перемальовування
   // панелі (patch) інакше скидає поля до значень за замовчуванням.
   form: {
@@ -43,6 +43,7 @@ let scApi = null; // проміс завантаження SoundCloud Widget API
 let volume = 50; // гучність треків, 0–100
 try { volume = Math.min(100, Math.max(0, Number(localStorage.getItem("mr_volume") ?? 50))); } catch { /* типове 50 */ }
 let currentSc = null; // віджет SoundCloud поточного треку
+let appliedSiteVotes = new Map(); // голоси гравців із сайту, уже враховані: uid → підпис
 const reel = new Reel(els.reel, { sound: true }); // звук обертання йде лише зі сторінки ведучого
 let landedSpin = null; // id обертання, яке вже зупинилось (до цього тему не показуємо)
 let gameSubs = [];
@@ -91,7 +92,7 @@ function subscribeGame(id) {
   render();
   if (!id) return;
   gameSubs.push(
-    onSnapshot(gref(), (s) => { S.game = s.data() ?? null; syncRound(); resumeVoting(); onMovesChanged(); render(); }),
+    onSnapshot(gref(), (s) => { S.game = s.data() ?? null; syncRound(); resumeVoting(); onMovesChanged(); applySiteVotes(); render(); }),
     onSnapshot(gcol("players"), (s) => {
       S.players = s.docs.map((d) => ({ uid: d.id, ...d.data() }));
       for (const p of S.players) justSeated.delete(p.uid);
@@ -112,6 +113,7 @@ function syncRound() {
   if (key === roundKey) return;
   roundSubs.forEach((off) => off());
   roundSubs = []; roundKey = key; S.round = null; S.moves = []; S.secret = null; S.collector = null;
+  S.siteVotes = []; appliedSiteVotes = new Map();
   if (!n) return;
   roundSubs.push(
     onSnapshot(gref("rounds", String(n)), (s) => { S.round = s.data() ?? null; updatePlayer(); render(); }),
@@ -120,7 +122,27 @@ function syncRound() {
       onMovesChanged();
       render(); // стіл і лічильник «Зіграли карту» оновлюються одразу
     }),
+    // Голоси гравців із сайту зливаються з голосами чату в один VoteCollector.
+    onSnapshot(gcol("rounds", String(n), "votes"), (s) => {
+      S.siteVotes = s.docs.map((d) => ({ uid: d.id, ...d.data() }));
+      applySiteVotes();
+    }),
   );
+}
+
+/** Враховує нові/змінені голоси з сайту. Порядок надходження = порядок голосів,
+ *  тож разом із чатом діє правило «рахується останній». */
+function applySiteVotes() {
+  if (S.game?.phase !== PHASE.VOTE || !S.collector?.open) return;
+  let changed = false;
+  for (const v of S.siteVotes ?? []) {
+    const sig = `${v.slot}|${v.at?.seconds ?? ""}.${v.at?.nanoseconds ?? ""}`;
+    if (appliedSiteVotes.get(v.uid) === sig) continue;
+    appliedSiteVotes.set(v.uid, sig);
+    const login = S.players.find((p) => p.uid === v.uid)?.login;
+    if (S.collector.handleSlot(login, v.slot)) changed = true;
+  }
+  if (changed) render();
 }
 
 // ── Перевірка заявок (замість Cloud Function) ───────────────
@@ -329,6 +351,7 @@ const A = {
   openVote: () => once("openVote", async () => {
     await ensureCollector();
     S.collector.open = true;
+    appliedSiteVotes = new Map();
     await updateDoc(gref(), { phase: PHASE.VOTE, phaseEndsAt: Date.now() + S.game.settings.voteSeconds * 1000 });
   }),
 
@@ -457,7 +480,7 @@ function ensureCollector() {
 function resumeVoting() {
   if (S.game?.phase !== PHASE.VOTE || S.collector?.open) return;
   ensureCollector().then(() => {
-    if (S.game?.phase === PHASE.VOTE) { S.collector.open = true; render(); }
+    if (S.game?.phase === PHASE.VOTE) { S.collector.open = true; appliedSiteVotes = new Map(); applySiteVotes(); render(); }
   });
 }
 
@@ -784,7 +807,7 @@ function viewStage() {
       ${open ? `<span class="src">${sourceLabel(p.source)}</span><span class="title">${esc(p.title)}</span>` : ""}${author}</li>`;
   }).join("");
   const voteInfo = g.phase === PHASE.VOTE
-    ? `<p class="hint">Пиши в чат номер треку · голосів: ${S.collector?.voterCount ?? 0}</p>` : "";
+    ? `<p class="hint">Пиши в чат номер треку або голосуй на сайті · голосів: ${S.collector?.voterCount ?? 0}</p>` : "";
   return `${voteInfo}${plays.length ? `<ul class="deck plays compact">${cards}</ul>` : ""}`;
 }
 
