@@ -219,7 +219,11 @@ summary { cursor: pointer; color: var(--muted); }
 .stage-final { padding-top: 40px; }
 .stage-col .deck { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
 .player { margin-top: 20px; }
-.player iframe { width: 100%; aspect-ratio: 16 / 9; border: 0; border-radius: var(--radius); background: #000; }
+.player iframe {
+  display: block; width: 100%; aspect-ratio: 16 / 9; border: 0; border-radius: var(--radius); background: #000;
+  /* Відео завжди вміщається у вікно: шапка + компактні картки + посилання під ним. */
+  max-height: calc(100vh - 300px); min-height: 220px;
+}
 .side-col .panel { padding: 16px; }
 .seats { list-style: none; padding: 0; }
 .seats li { align-items: center; }
@@ -378,3 +382,22 @@ summary { cursor: pointer; color: var(--muted); }
   30% { box-shadow: 0 0 40px rgba(212,169,74,.7); }
   100% { box-shadow: 0 0 12px rgba(212,169,74,.25); }
 }
+
+/* ── Верхня смуга ведучого: фаза, тема, таймер ── */
+.topbar > .top-stage { margin: 0 auto; flex: 1; min-width: 0; display: flex; align-items: baseline; justify-content: center; gap: 18px; }
+.top-stage #top-stage { display: flex; align-items: baseline; gap: 14px; min-width: 0; }
+.top-stage .phase { white-space: nowrap; }
+.top-stage .theme { font-size: clamp(1.3rem, 2.4vw, 2.1rem); line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.top-stage .countdown { min-height: 0; }
+
+/* ── Компактні картки під час прослуховування ── */
+.stage-col .deck.compact { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin: 8px 0 14px; }
+.stage-col .deck.compact .sleeve { width: 150px; }
+.deck.compact .sleeve { padding: 10px; }
+.deck.compact .sleeve .title { font-size: .85rem; -webkit-line-clamp: 2; }
+.deck.compact .sleeve .num { font-size: 1.5rem; top: 6px; left: 8px; }
+.deck.compact .sleeve .author { font-size: .78rem; }
+.sleeve.clickable { cursor: pointer; transition: transform .15s, box-shadow .15s; }
+.sleeve.clickable:hover { transform: translateY(-3px); box-shadow: 0 0 0 2px var(--brass-dim), 0 10px 20px rgba(0,0,0,.5); }
+.sleeve.clickable.playing:hover { box-shadow: 0 0 0 3px var(--brass), 0 0 30px rgba(212,169,74,.5); }
+.stage-col .hint { margin: 6px 0 0; }

@@ -21,7 +21,7 @@ import {
 import { $, esc, patch, fmtCountdown, sourceLabel, podiumHTML, originalityHTML, plural, CARDS } from "./ui.js";
 
 const els = {
-  auth: $("#auth"), control: $("#control"), stage: $("#stage"), reel: $("#reel"),
+  auth: $("#auth"), control: $("#control"), stage: $("#stage"), reel: $("#reel"), top: $("#top-stage"),
   player: $("#player"), seats: $("#seats"), log: $("#log"),
 };
 
@@ -566,6 +566,7 @@ function render() {
   syncReel();
   patch(els.control, viewControl());
   patch(els.stage, viewStage());
+  patch(els.top, viewTop());
   patch(els.seats, viewSeats());
   patch(els.log, S.logLines.map((l) => `<li>${esc(l)}</li>`).join(""));
   updatePlayer();
@@ -682,18 +683,28 @@ function viewStage() {
   if (g.phase === PHASE.ORIGINALITY) return originalityHTML(g.originality?.groups);
   const plays = S.round?.plays ?? [];
   const revealed = new Set(g.revealed ?? []);
+  // Клік по картці вмикає трек (те саме, що кнопки №1, №2… на панелі).
+  const clickable = [PHASE.LISTEN, PHASE.VOTE, PHASE.RESULTS].includes(g.phase);
   const cards = plays.map((p) => {
     const open = revealed.has(p.slot) || S.round.revealed;
     const author = S.round.revealed ? `<span class="author">${esc(p.displayName)} · ${p.votes} гол.</span>` : "";
-    return `<li class="sleeve ${open ? "face" : "back"}${g.nowPlaying === p.slot ? " playing" : ""}"><span class="num">${p.slot}</span>
+    const click = clickable ? ` data-action="play" data-arg="${p.slot}" title="Увімкнути трек №${p.slot}"` : "";
+    return `<li class="sleeve ${open ? "face" : "back"}${g.nowPlaying === p.slot ? " playing" : ""}${clickable ? " clickable" : ""}"${click}><span class="num">${p.slot}</span>
       ${open ? `<span class="src">${sourceLabel(p.source)}</span><span class="title">${esc(p.title)}</span>` : ""}${author}</li>`;
   }).join("");
   const voteInfo = g.phase === PHASE.VOTE
     ? `<p class="hint">Пиши в чат номер треку · голосів: ${S.collector?.voterCount ?? 0}</p>` : "";
+  return `${voteInfo}${plays.length ? `<ul class="deck plays compact">${cards}</ul>` : ""}`;
+}
+
+/** Фаза, тема й таймер у верхній смузі — так сцені лишається більше місця під відео. */
+function viewTop() {
+  const g = S.game;
+  if (!isHost() || !g || g.phase === PHASE.FINAL) return "";
   const showTheme = g.theme && (g.phase !== PHASE.SPIN || landedSpin === g.spin?.id);
-  return `<div class="stage-head"><div class="phase">${esc(PHASE_LABEL[g.phase])}</div>
-      ${showTheme ? `<div class="theme big">${esc(g.theme)}</div>` : ""}<div id="countdown" class="countdown"></div></div>
-    ${voteInfo}${plays.length ? `<ul class="deck plays">${cards}</ul>` : ""}`;
+  const round = g.round ? ` · раунд ${g.round}/${g.settings.rounds}` : "";
+  return `<div class="phase">${esc(PHASE_LABEL[g.phase])}${round}</div>
+    ${showTheme ? `<div class="theme">${esc(g.theme)}</div>` : ""}`;
 }
 
 function viewSeats() {
