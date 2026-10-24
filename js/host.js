@@ -831,12 +831,16 @@ function boughtThisRound(n) {
 }
 
 /** Обробляє заявки по черзі за часом. Ціну рахуємо тут, з актуальних балів. */
+/** «Готовий» у магазині = у полі ready записано номер цього раунду. Так після лобі
+ *  (де ready = true) і в кожному новому магазині всі автоматично не готові. */
+const shopReady = (p) => p.ready === S.game?.round;
+
 /** Усі за столом натиснули «Готовий» і всі покупки оброблено — закриваємо магазин. */
 function maybeAutoCloseShop() {
   if (S.game?.phase !== PHASE.SHOP) return;
   const ps = activePlayers();
   const pendingBuys = S.shopReqs.some((r) => !r.status);
-  if (ps.length && ps.every((p) => p.ready) && !pendingBuys) {
+  if (ps.length && ps.every((p) => shopReady(p)) && !pendingBuys) {
     log("Усі готові — магазин закрито");
     A.closeShop();
   }
@@ -1199,7 +1203,7 @@ function viewControl() {
     case PHASE.SHOP: {
       const done = S.shopReqs.filter((r) => r.status === "ok").length;
       const ps = activePlayers();
-      const ready = ps.filter((p) => p.ready).length;
+      const ready = ps.filter((p) => shopReady(p)).length;
       body = `<p class="muted">Покупок: ${done} · готові: ${ready} / ${ps.length}. Коли всі натиснуть «Готовий», магазин закриється сам.</p>${b("closeShop", "Закрити магазин зараз", { primary: true })}`;
       break;
     }
@@ -1336,7 +1340,7 @@ function viewSeats() {
   const rows = S.players.slice().sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).map((p) => `<li class="${p.status}">
       ${p.avatar ? `<img src="${esc(p.avatar)}" alt="">` : ""}
       <span class="name">${esc(p.displayName)}</span>
-      <span class="muted small">${S.game.phase === PHASE.LOBBY ? `${p.cardCount}/${deckSize(S.game.settings)} ${p.ready ? "✓ готовий" : ""}` : p.status === "pending" ? `новачок · ${p.cardCount ?? 0}/${p.need} ${p.ready ? "✓ сяде з наступного раунду" : ""}` : p.status === "out" ? "вибув" : S.game.phase === PHASE.DISCARD && thrown.has(p.uid) ? `${plural(Math.max(0, (p.cardCount ?? 0) - 1), CARDS)} · зіграв` : S.game.phase === PHASE.DISCARD && passed.has(p.uid) ? `${plural(p.cardCount ?? 0, CARDS)} · пас` : plural(p.cardCount ?? 0, CARDS)}</span>
+      <span class="muted small">${S.game.phase === PHASE.LOBBY ? `${p.cardCount}/${deckSize(S.game.settings)} ${p.ready ? "✓ готовий" : ""}` : p.status === "pending" ? `новачок · ${p.cardCount ?? 0}/${p.need} ${p.ready ? "✓ сяде з наступного раунду" : ""}` : p.status === "out" ? "вибув" : S.game.phase === PHASE.SHOP ? `${plural(p.cardCount ?? 0, CARDS)}${shopReady(p) ? " · ✓ готовий" : ""}` : S.game.phase === PHASE.DISCARD && thrown.has(p.uid) ? `${plural(Math.max(0, (p.cardCount ?? 0) - 1), CARDS)} · зіграв` : S.game.phase === PHASE.DISCARD && passed.has(p.uid) ? `${plural(p.cardCount ?? 0, CARDS)} · пас` : plural(p.cardCount ?? 0, CARDS)}</span>
       ${(p.tokens ?? 0) > 0 ? `<span class="muted small" title="Жетони повторного обертання">🔄${p.tokens}</span>` : ""}
       ${(p.doubleTokens ?? 0) > 0 ? `<span class="muted small" title="Жетони подвоєння">✖2·${p.doubleTokens}</span>` : ""}
       ${S.game.mods?.round === S.game.round && (S.game.mods.double ?? []).includes(p.uid) ? `<span class="small" title="Бали за цей раунд ×2" style="color:var(--ok)">×2</span>` : ""}

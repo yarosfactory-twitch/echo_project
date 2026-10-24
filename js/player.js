@@ -178,7 +178,8 @@ const actions = {
   },
   async shopReady() {
     if (S.game.phase !== PHASE.SHOP || S.me?.status !== "active") return;
-    await updateDoc(gref("players", S.uid), { ready: !S.me.ready });
+    // Номер раунду замість true: «готовий» діє лише в цьому магазині.
+    await updateDoc(gref("players", S.uid), { ready: iAmShopReady() ? false : S.game.round });
   },
   async respin() {
     const g = S.game;
@@ -517,6 +518,8 @@ function canRespin() {
     && g.spin?.round === g.round && landedSpin === g.spin.id && S.respinSent !== g.spin.id;
 }
 
+const iAmShopReady = () => S.me?.ready === S.game?.round;
+
 const ITEM_ICON = { queue: "⏭", swap: "🔁", extraCard: "➕", double: "✖2", respin: "🔄" };
 
 function viewShop() {
@@ -566,8 +569,8 @@ function viewShop() {
     <ul class="shop">${cards}</ul>
     ${log ? `<h3>Твої покупки</h3><ul class="shop-mine">${log}</ul>` : ""}
     <div class="shop-ready">
-      <button class="btn ${me.ready ? "" : "primary"}" data-action="shopReady">${me.ready ? "Ще хочу щось купити" : "Готовий"}</button>
-      <span class="muted small">Готові: ${S.players.filter((p) => p.status === "active" && p.ready).length} / ${S.players.filter((p) => p.status === "active").length}. Коли готові всі — магазин закриється.</span>
+      <button class="btn ${iAmShopReady() ? "" : "primary"}" data-action="shopReady">${iAmShopReady() ? "Ще хочу щось купити" : "Готовий"}</button>
+      <span class="muted small">Готові: ${S.players.filter((p) => p.status === "active" && p.ready === S.game.round).length} / ${S.players.filter((p) => p.status === "active").length}. Коли готові всі — магазин закриється.</span>
     </div>
   </section>`;
 }
