@@ -18,7 +18,7 @@ import { Reel, SPIN_MS } from "./reel.js";
 import {
   PHASE, PHASE_LABEL, MODE_LABEL, deckSize, shuffle, pickRandom, standings, leadersTie, DEFAULT_THEMES,
 } from "./game-logic.js";
-import { $, esc, patch, fmtCountdown, sourceLabel, standingsHTML, originalityHTML, plural, CARDS } from "./ui.js";
+import { $, esc, patch, fmtCountdown, sourceLabel, standingsHTML, originalityHTML, tableHTML, plural, CARDS } from "./ui.js";
 
 const els = {
   auth: $("#auth"), control: $("#control"), stage: $("#stage"), reel: $("#reel"), top: $("#top-stage"),
@@ -118,6 +118,7 @@ function syncRound() {
     onSnapshot(gcol("rounds", String(n), "moves"), (s) => {
       S.moves = s.docs.map((d) => ({ uid: d.id, ...d.data() }));
       onMovesChanged();
+      render(); // стіл і лічильник «Зіграли карту» оновлюються одразу
     }),
   );
 }
@@ -738,7 +739,7 @@ function viewControl() {
       break;
     }
     case PHASE.DISCARD:
-      body = `<p class="muted">Скинули: ${S.moves.length} / ${activePlayers().filter(hasCards).length}</p>${b("closeDiscard", "Завершити скидання зараз")}`;
+      body = `<p class="muted">Зіграли карту: ${S.moves.length} / ${activePlayers().filter(hasCards).length}</p>${b("closeDiscard", "Завершити скидання зараз")}`;
       break;
     case PHASE.LISTEN:
       body = `<div class="row">${plays.map((p) => b("play", `№${p.slot}`, { arg: p.slot, primary: g.nowPlaying === p.slot })).join("")}</div>
@@ -767,6 +768,10 @@ function viewStage() {
   const g = S.game;
   if (g.phase === PHASE.FINAL) return `<div class="stage-final"><h1 class="final-title">Фінал</h1>${standingsHTML(g.final)}</div>`;
   if (g.phase === PHASE.ORIGINALITY) return originalityHTML(g.originality?.groups);
+  // Поки гравці обирають карти — показуємо стіл, як у гравців.
+  if (g.phase === PHASE.DISCARD) {
+    return `<div class="stage-table">${tableHTML({ players: S.players, phase: g.phase, thrown: new Set(S.moves.map((m) => m.uid)) })}</div>`;
+  }
   const plays = S.round?.plays ?? [];
   const revealed = new Set(g.revealed ?? []);
   // Клік по картці вмикає трек (те саме, що кнопки №1, №2… на панелі).

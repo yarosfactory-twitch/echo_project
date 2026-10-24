@@ -35,6 +35,32 @@ export function fanHTML(count, max = 10) {
   return `<div class="fan">${out}</div>`;
 }
 
+/** cardCount оновлюється лише після закриття скидання, тому зіграну карту
+ *  віднімаємо одразу, щоб вона не «висіла» в руці. */
+export const cardsInHand = (p, threwThisRound) => Math.max(0, (p.cardCount ?? 0) - (threwThisRound ? 1 : 0));
+
+/** Стіл: віяла карт гравців і карти, кинуті в центр. Спільний для гравця й ведучого.
+ *  @param {{players: object[], phase: string, thrown: Set<string>, meUid?: string}} o */
+export function tableHTML({ players, phase, thrown, meUid = null }) {
+  const seats = players.filter((p) => p.status === "active" || p.status === "out");
+  if (!seats.length) return "";
+  const showThrown = phase === "discard";
+  const seatHTML = seats.map((p) => {
+    const threw = showThrown && thrown.has(p.uid);
+    return `<div class="seat ${p.status}${p.uid === meUid ? " me" : ""}">
+      ${fanHTML(p.status === "active" ? cardsInHand(p, threw) : 0)}
+      <div class="name">${esc(p.displayName)}${phase === "lobby" ? (p.ready ? " ✓" : "") : ""}</div>
+      <div class="score">${p.status === "out" ? "вибув" : `${p.score ?? 0} б.`}</div>
+      ${threw ? `<span class="sleeve back thrown"></span>` : ""}
+    </div>`;
+  }).join("");
+  const pile = showThrown
+    ? `<div class="pile">${[...thrown].map((_, i) => `<span class="sleeve back" style="--r:${((i * 37) % 30) - 15}deg"></span>`).join("")}</div>
+       <div class="pile-label">${plural(thrown.size, CARDS)} у центрі</div>`
+    : "";
+  return `<div class="felt-table"><div class="center-pile">${pile}</div>${seatHTML}</div>`;
+}
+
 /** Підсумок гри: зверху ті, хто дійшов до кінця, нижче вибулі.
  *  Обидва списки за балами (standings() уже сортує; переможець тай-брейку перший). */
 export function standingsHTML(final) {

@@ -7,7 +7,7 @@ import { resolveTrack, TrackError, formatTimecode } from "./tracks.js";
 import { PHASE, PHASE_LABEL, deckSize } from "./game-logic.js";
 import { MAX_PLAYERS } from "./config.js";
 import { Reel } from "./reel.js";
-import { $, esc, patch, fmtCountdown, sourceLabel, fanHTML, standingsHTML, originalityHTML, plural, CARDS } from "./ui.js";
+import { $, esc, patch, fmtCountdown, sourceLabel, tableHTML, standingsHTML, originalityHTML } from "./ui.js";
 
 const els = { me: $("#me"), status: $("#status"), main: $("#main"), table: $("#table") };
 
@@ -274,10 +274,10 @@ function viewHand() {
     <h2>Обери карту під тему</h2>
     <ul class="deck hand">${cards}</ul>
     <div class="row">
-      <button class="btn primary" data-action="discard" ${S.selected ? "" : "disabled"}>Скинути карту</button>
+      <button class="btn primary" data-action="discard" ${S.selected ? "" : "disabled"}>Зіграти карту</button>
       <button class="btn" data-action="pass" ${S.selected ? "" : "disabled"} title="Обрана карта згорить, 0 балів за раунд">Пас</button>
     </div>
-    <p class="muted small">Не встигнеш ні скинути, ні пасувати — вибуваєш.</p>
+    <p class="muted small">Не встигнеш ні зіграти карту, ні пасувати — вибуваєш.</p>
   </section>`;
 }
 
@@ -303,24 +303,11 @@ function viewFinal() {
 
 function viewTable() {
   if (!S.game || S.game.phase === PHASE.FINAL) return "";
-  const seats = S.players.filter((p) => p.status === "active" || p.status === "out");
-  if (!seats.length) return "";
-  const thrown = new Set(S.round?.thrown ?? []);
-  const showThrown = S.game.phase === PHASE.DISCARD;
-  const seatHTML = seats.map((p) => `<div class="seat ${p.status}${p.uid === S.uid ? " me" : ""}">
-      ${fanHTML(p.status === "active" ? cardsInHand(p, showThrown && thrown.has(p.uid)) : 0)}
-      <div class="name">${esc(p.displayName)}${S.game.phase === PHASE.LOBBY ? (p.ready ? " ✓" : "") : ""}</div>
-      <div class="score">${p.status === "out" ? "вибув" : `${p.score ?? 0} б.`}</div>
-      ${showThrown && thrown.has(p.uid) ? `<span class="sleeve back thrown"></span>` : ""}
-    </div>`).join("");
-  return `<div class="felt-table"><div class="center-pile">${showThrown ? `${plural(thrown.size, CARDS)} у центрі` : ""}</div>${seatHTML}</div>`;
+  return tableHTML({ players: S.players, phase: S.game.phase, thrown: new Set(S.round?.thrown ?? []), meUid: S.uid });
 }
 
 const startBadge = (c) => (c.start ? ` · <span class="start">▶ з ${formatTimecode(c.start)}</span>` : "");
 
-/** cardCount оновлюється лише після закриття скидання, тому кинуту карту
- *  віднімаємо одразу, щоб вона не «висіла» в руці. */
-const cardsInHand = (p, threwThisRound) => Math.max(0, (p.cardCount ?? 0) - (threwThisRound ? 1 : 0));
 
 function syncReel() {
   const g = S.game;

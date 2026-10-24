@@ -424,3 +424,14 @@ summary { cursor: pointer; color: var(--muted); }
   font-size: calc(var(--row-h) * .22); letter-spacing: .2em; text-transform: uppercase; color: var(--brass);
   background: rgba(6,22,16,.82);
 }
+
+/* ── Стіл: купка карт у центрі, стіл на сцені ведучого ── */
+.center-pile { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.pile { position: relative; height: 64px; width: 64px; }
+.pile .sleeve { position: absolute; inset: 0; width: 46px; height: 46px; margin: auto; padding: 0; transform: rotate(var(--r)); animation: land .45s ease-out; }
+.pile-label { color: var(--muted); font-size: .9rem; }
+@keyframes land { from { transform: translateY(-40px) rotate(0) scale(1.2); opacity: 0; } to { transform: rotate(var(--r)); opacity: 1; } }
+.stage-table { padding: 24px 0; }
+.stage-table .felt-table { min-height: 360px; align-content: center; gap: 36px 56px; }
+.stage-table .fan { transform: scale(1.3); margin-bottom: 18px; }
+.stage-table .seat .name { font-size: 1.15rem; }
