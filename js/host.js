@@ -38,6 +38,8 @@ const S = {
   },
 };
 const busy = new Set();
+// Оголошено тут, до boot(): boot() викликається одразу після входу, ще до решти модуля.
+let scApi = null; // проміс завантаження SoundCloud Widget API
 const reel = new Reel(els.reel, { sound: true }); // звук обертання йде лише зі сторінки ведучого
 let landedSpin = null; // id обертання, яке вже зупинилось (до цього тему не показуємо)
 let gameSubs = [];
@@ -565,7 +567,6 @@ function updatePlayer() {
 }
 
 // SoundCloud не приймає час старту в адресі плеєра, тож перемотуємо через Widget API.
-let scApi = null;
 function loadSoundCloudApi() {
   scApi ??= new Promise((resolve, reject) => {
     const el = document.createElement("script");
