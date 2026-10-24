@@ -3,7 +3,7 @@ import {
   db, ensureAnonUser, doc, collection, onSnapshot, setDoc, updateDoc, deleteDoc, serverTimestamp,
 } from "./firebase.js";
 import { startLogin, consumeRedirect } from "./twitch.js";
-import { resolveTrack, TrackError } from "./tracks.js";
+import { resolveTrack, TrackError, formatTimecode } from "./tracks.js";
 import { PHASE, PHASE_LABEL, deckSize } from "./game-logic.js";
 import { MAX_PLAYERS } from "./config.js";
 import { Reel } from "./reel.js";
@@ -235,7 +235,7 @@ function viewDeckBuilder() {
   for (let i = 0; i < need; i++) {
     const c = deck[i];
     slots.push(c
-      ? `<li class="sleeve face"><span class="src">${sourceLabel(c.source)}</span><span class="title">${esc(c.title)}</span>
+      ? `<li class="sleeve face"><span class="src">${sourceLabel(c.source)}${startBadge(c)}</span><span class="title">${esc(c.title)}</span>
           <button class="x" data-action="removeCard" data-arg="${esc(c.key)}" title="Прибрати">×</button></li>`
       : `<li class="sleeve empty">порожня карта</li>`);
   }
@@ -243,6 +243,7 @@ function viewDeckBuilder() {
   return `<section class="panel">
     <h2>Твоя колода <span class="muted">${deck.length} / ${need}</span></h2>
     <p class="muted">Теми невідомі заздалегідь, тож бери різні треки. YouTube або SoundCloud.</p>
+    <p class="muted small">Хочеш, щоб трек грав з певного моменту? Встав посилання з таймкодом: на YouTube «Поділитися → Почати з», на SoundCloud «Share → At».</p>
     <p class="muted small">${isClassic()
       ? "Класичний режим: якщо трек уже взяв інший гравець, сайт попросить обрати інший."
       : "Хардкор: якщо такий самий трек принесе ще хтось, на старті гри він згорить в обох. Ризикуєш, коли береш очевидні хіти."}</p>
@@ -268,7 +269,7 @@ function viewHand() {
       <p class="muted">Ти автоматично пасуєш у цьому раунді й лишаєшся за столом.</p></section>`;
   }
   const cards = hand.map((c) => `<li class="sleeve face pick ${S.selected === c.key ? "selected" : ""}" data-action="select" data-arg="${esc(c.key)}">
-      <span class="src">${sourceLabel(c.source)}</span><span class="title">${esc(c.title)}</span></li>`).join("");
+      <span class="src">${sourceLabel(c.source)}${startBadge(c)}</span><span class="title">${esc(c.title)}</span></li>`).join("");
   return `<section class="panel">
     <h2>Обери карту під тему</h2>
     <ul class="deck hand">${cards}</ul>
@@ -314,6 +315,8 @@ function viewTable() {
     </div>`).join("");
   return `<div class="felt-table"><div class="center-pile">${showThrown ? `${plural(thrown.size, CARDS)} у центрі` : ""}</div>${seatHTML}</div>`;
 }
+
+const startBadge = (c) => (c.start ? ` · <span class="start">▶ з ${formatTimecode(c.start)}</span>` : "");
 
 /** cardCount оновлюється лише після закриття скидання, тому кинуту карту
  *  віднімаємо одразу, щоб вона не «висіла» в руці. */

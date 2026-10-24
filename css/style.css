@@ -401,3 +401,6 @@ summary { cursor: pointer; color: var(--muted); }
 .sleeve.clickable:hover { transform: translateY(-3px); box-shadow: 0 0 0 2px var(--brass-dim), 0 10px 20px rgba(0,0,0,.5); }
 .sleeve.clickable.playing:hover { box-shadow: 0 0 0 3px var(--brass), 0 0 30px rgba(212,169,74,.5); }
 .stage-col .hint { margin: 6px 0 0; }
+
+.sleeve .src .start { color: var(--brass); font-weight: 700; letter-spacing: .04em; }
+.player .muted.small { margin-left: 8px; }

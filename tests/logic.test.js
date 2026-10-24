@@ -95,3 +95,19 @@ test("Множина українською", () => {
   assert.deepEqual([0, 1, 2, 4, 5, 11, 12, 21, 22, 25].map((n) => plural(n, CARDS)),
     ["0 карт", "1 карта", "2 карти", "4 карти", "5 карт", "11 карт", "12 карт", "21 карта", "22 карти", "25 карт"]);
 });
+
+import { parseTimecode, parseStartTime, formatTimecode } from "../js/tracks.js";
+test("Таймкод з посилань YouTube і SoundCloud", () => {
+  assert.equal(parseStartTime("https://youtu.be/dQw4w9WgXcQ?t=83"), 83);
+  assert.equal(parseStartTime("https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=1m23s"), 83);
+  assert.equal(parseStartTime("https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=83s"), 83);
+  assert.equal(parseStartTime("https://www.youtube.com/embed/dQw4w9WgXcQ?start=90"), 90);
+  assert.equal(parseStartTime("https://www.youtube.com/watch?v=dQw4w9WgXcQ#t=1h2m3s"), 3723);
+  assert.equal(parseStartTime("https://soundcloud.com/artist/song#t=1:23"), 83);
+  assert.equal(parseStartTime("https://soundcloud.com/artist/song#t=1:02:03"), 3723);
+  assert.equal(parseStartTime("https://youtu.be/dQw4w9WgXcQ"), 0);
+  assert.equal(parseStartTime("https://youtu.be/dQw4w9WgXcQ?t=abc"), 0);
+  assert.equal(parseTimecode("2m"), 120);
+  assert.equal(formatTimecode(83), "1:23");
+  assert.equal(formatTimecode(3723), "1:02:03");
+});

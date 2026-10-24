@@ -6,6 +6,36 @@ export class TrackError extends Error {}
 
 const YT_ID = /^[A-Za-z0-9_-]{11}$/;
 
+/** Таймкод у форматах 83, 83s, 1m23s, 1h2m3s, 1:23, 1:02:03 → секунди (або 0). */
+export function parseTimecode(raw) {
+  const t = String(raw ?? "").trim().toLowerCase();
+  if (!t) return 0;
+  if (/^\d+(\.\d+)?s?$/.test(t)) return Math.floor(parseFloat(t));
+  const hms = t.match(/^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s?)?$/);
+  if (hms && (hms[1] || hms[2] || hms[3])) return (+hms[1] || 0) * 3600 + (+hms[2] || 0) * 60 + (+hms[3] || 0);
+  const colon = t.match(/^(\d+):(\d{1,2})(?::(\d{1,2}))?$/);
+  if (colon) return colon[3] != null ? +colon[1] * 3600 + +colon[2] * 60 + +colon[3] : +colon[1] * 60 + +colon[2];
+  return 0;
+}
+
+/** Час старту з посилання: YouTube ?t= / &start= / #t=, SoundCloud #t=. */
+export function parseStartTime(raw) {
+  let u;
+  try { u = new URL(String(raw).trim()); } catch { return 0; }
+  const fromQuery = u.searchParams.get("t") ?? u.searchParams.get("start");
+  if (fromQuery) return parseTimecode(fromQuery);
+  const hash = new URLSearchParams(u.hash.replace(/^#/, ""));
+  return parseTimecode(hash.get("t") ?? "");
+}
+
+/** 83 → "1:23", 3723 → "1:02:03". */
+export function formatTimecode(sec) {
+  const s = Math.max(0, Math.floor(sec || 0));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60;
+  const pad = (n) => String(n).padStart(2, "0");
+  return h ? `${h}:${pad(m)}:${pad(r)}` : `${m}:${pad(r)}`;
+}
+
 /** Чистий розбір без мережі. → {source:'youtube', id} | {source:'soundcloud', url} | null */
 export function parseTrackUrl(raw) {
   let u;
@@ -45,7 +75,11 @@ export function extractSoundCloudId(html = "") {
 export async function resolveTrack(raw) {
   const parsed = parseTrackUrl(raw);
   if (!parsed) throw new TrackError("Це не схоже на посилання на трек YouTube або SoundCloud");
-  return parsed.source === "youtube" ? resolveYouTube(parsed.id) : resolveSoundCloud(parsed.url);
+  const track = parsed.source === "youtube" ? await resolveYouTube(parsed.id) : await resolveSoundCloud(parsed.url);
+  const start = parseStartTime(raw);
+  // Посилання «Відкрити в новій вкладці» теж відкриває з таймкоду.
+  if (start) track.url = track.source === "youtube" ? `${track.url}&t=${start}s` : `${track.url}#t=${formatTimecode(start)}`;
+  return { ...track, start };
 }
 
 async function resolveYouTube(id) {
@@ -91,10 +125,12 @@ async function resolveSoundCloud(url) {
   return { key: `sc_${id}`, source: "soundcloud", id, url, title: data.title || "Без назви", author: data.author_name || "" };
 }
 
-/** Адреса плеєра для iframe на сторінці ведучого. Трек грає з початку. */
+/** Адреса плеєра для iframe на сторінці ведучого. YouTube стартує з card.start;
+ *  SoundCloud перемотує ведучий через Widget API (див. host.js). */
 export function embedUrl(card) {
   if (card.source === "youtube") {
-    return `https://www.youtube.com/embed/${card.id}?autoplay=1&rel=0`;
+    const start = card.start ? `&start=${Math.floor(card.start)}` : "";
+    return `https://www.youtube.com/embed/${card.id}?autoplay=1&rel=0${start}`;
   }
   const api = `https://api.soundcloud.com/tracks/${card.id}`;
   return `https://w.soundcloud.com/player/?url=${encodeURIComponent(api)}&auto_play=true&visual=true`;

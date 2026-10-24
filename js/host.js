@@ -10,7 +10,7 @@ import {
   MIN_ACCOUNT_AGE_DAYS, CHAT_BOTS, DEFAULT_SETTINGS,
 } from "./config.js";
 import { validateToken, getTwitchUser, revokeToken, accountAgeDays } from "./twitch.js";
-import { embedUrl } from "./tracks.js";
+import { embedUrl, formatTimecode } from "./tracks.js";
 import { VoteCollector } from "./votes.js";
 import { findDuplicateGroups, burnPlan, burnedKeys } from "./originality.js";
 import { connectChat } from "./chat.js";
@@ -315,7 +315,8 @@ const A = {
   closeDiscard: () => once("closeDiscard", closeDiscard),
 
   play: (slot) => once("play", async () => {
-    await updateDoc(gref(), { nowPlaying: Number(slot), revealed: arrayUnion(Number(slot)) });
+    // playNonce: повторний клік по тому самому треку перезапускає його з таймкоду.
+    await updateDoc(gref(), { nowPlaying: Number(slot), playNonce: Date.now(), revealed: arrayUnion(Number(slot)) });
   }),
 
   openVote: () => once("openVote", async () => {
@@ -419,7 +420,7 @@ async function closeDiscard() {
   // TODO: плюшка «Черга» (перший/останній) змінює порядок після перемішування.
   const ordered = shuffle(plays).map((x, i) => ({ ...x, slot: i + 1 }));
   batch.set(gref("rounds", String(n)), {
-    plays: ordered.map(({ slot, card }) => ({ slot, source: card.source, id: card.id, url: card.url, title: card.title })),
+    plays: ordered.map(({ slot, card }) => ({ slot, source: card.source, id: card.id, url: card.url, title: card.title, start: card.start ?? 0 })),
     revealed: false,
   }, { merge: true });
   batch.set(gref("secret", `round_${n}`), {
@@ -551,12 +552,41 @@ function updatePlayer() {
   const slot = S.game?.nowPlaying;
   const card = (S.round?.plays ?? []).find((p) => p.slot === slot);
   const src = card ? embedUrl(card) : "";
-  if (els.player.dataset.src === src) return;
-  els.player.dataset.src = src;
+  const key = src ? `${src}#${S.game?.playNonce ?? 0}` : "";
+  if (els.player.dataset.key === key) return;
+  els.player.dataset.key = key;
+  const from = card?.start ? ` · старт з ${formatTimecode(card.start)}` : "";
   els.player.innerHTML = src
     ? `<iframe src="${esc(src)}" allow="autoplay; encrypted-media" allowfullscreen></iframe>
-       <a class="link small" href="${esc(card.url)}" target="_blank" rel="noopener">Не грає? Відкрити в новій вкладці</a>`
+       <a class="link small" href="${esc(card.url)}" target="_blank" rel="noopener">Не грає? Відкрити в новій вкладці</a><span class="muted small">${from}</span>`
     : "";
+  if (card?.source === "soundcloud" && card.start) seekSoundCloud(els.player.querySelector("iframe"), card.start);
+}
+
+// SoundCloud не приймає час старту в адресі плеєра, тож перемотуємо через Widget API.
+let scApi = null;
+function loadSoundCloudApi() {
+  scApi ??= new Promise((resolve, reject) => {
+    const el = document.createElement("script");
+    el.src = "https://w.soundcloud.com/player/api.js";
+    el.onload = () => resolve(window.SC);
+    el.onerror = () => { scApi = null; reject(new Error("SoundCloud API не завантажився")); };
+    document.head.append(el);
+  });
+  return scApi;
+}
+
+async function seekSoundCloud(iframe, startSec) {
+  try {
+    const SC = await loadSoundCloudApi();
+    const widget = SC.Widget(iframe);
+    widget.bind(SC.Widget.Events.READY, () => {
+      widget.seekTo(startSec * 1000);
+      widget.play();
+    });
+  } catch (e) {
+    log(`⚠ ${e.message}: трек грає з початку`);
+  }
 }
 
 // ── Рендер ──────────────────────────────────────────────────
