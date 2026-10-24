@@ -165,3 +165,21 @@ test("Голоси зберігаються і відновлюються піс
   d.load({ junk: 9 });
   assert.deepEqual(d.tally(), { 1: 1, 2: 1 });
 });
+
+import { roundsLeft, lateJoinOpen } from "../js/game-logic.js";
+test("Вхід посеред гри: скільки раундів лишилось і коли вхід закрито", () => {
+  const settings = { rounds: 6 };
+  assert.equal(roundsLeft({ phase: "originality", round: 0, settings }), 6);
+  assert.equal(roundsLeft({ phase: "spin", round: 1, settings }), 6);
+  assert.equal(roundsLeft({ phase: "discard", round: 1, settings }), 5);
+  assert.equal(roundsLeft({ phase: "spin", round: 3, settings }), 4);
+  assert.equal(roundsLeft({ phase: "results", round: 6, settings }), 0);
+  const g = { phase: "vote", round: 2, settings };
+  const ps = (hands) => hands.map((h, i) => ({ uid: "p" + i, status: "active", cardCount: h }));
+  assert.equal(lateJoinOpen(g, ps([5, 5]), 8), true);
+  assert.equal(lateJoinOpen(g, ps([3, 3]), 8), false, "по 3 карти — закрито");
+  assert.equal(lateJoinOpen(g, ps([4, 3]), 8), true);
+  assert.equal(lateJoinOpen({ ...g, phase: "lobby" }, ps([5]), 8), false);
+  assert.equal(lateJoinOpen({ ...g, phase: "final" }, ps([5]), 8), false);
+  assert.equal(lateJoinOpen(g, ps([5, 5, 5, 5, 5, 5, 5, 5]), 8), false, "немає місць");
+});

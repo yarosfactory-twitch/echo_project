@@ -12,6 +12,8 @@ service cloud.firestore {
     function game(g) { return get(/databases/$(database)/documents/games/$(g)).data; }
     function playerDoc(g) { return /databases/$(database)/documents/games/$(g)/players/$(request.auth.uid); }
     function isActivePlayer(g) { return signedIn() && exists(playerDoc(g)) && get(playerDoc(g)).data.status == 'active'; }
+    // Новачок посеред гри: уже посаджений ведучим, збирає колоду до старту наступного раунду.
+    function isPendingPlayer(g) { return signedIn() && exists(playerDoc(g)) && get(playerDoc(g)).data.status == 'pending'; }
 
     // Вказівник на активну гру, пул тем, історія: читають усі, пише ведучий.
     match /meta/{id}    { allow read: if true; allow write: if isHost(); }
@@ -42,10 +44,11 @@ service cloud.firestore {
           && (request.resource.data.status == resource.data.status || request.resource.data.status == 'out'));
       }
 
-      // Колода видна лише власнику і ведучому. Гравець редагує її тільки в лобі.
+      // Колода видна лише власнику і ведучому. Гравець редагує її в лобі,
+      // а новачок посеред гри — поки не сів за стіл.
       match /decks/{uid} {
         allow read: if isHost() || isSelf(uid);
-        allow write: if isHost() || (isSelf(uid) && game(g).phase == 'lobby');
+        allow write: if isHost() || (isSelf(uid) && (game(g).phase == 'lobby' || isPendingPlayer(g)));
       }
 
       // Класичний режим: реєстр треків гри для перевірки дублікатів у лобі.
@@ -53,7 +56,7 @@ service cloud.firestore {
       // запис буде відхилено. У хардкорі реєстр не використовується.
       match /tracks/{key} {
         allow read: if isHost();
-        allow create: if isActivePlayer(g) && game(g).phase == 'lobby'
+        allow create: if ((isActivePlayer(g) && game(g).phase == 'lobby') || isPendingPlayer(g))
           && game(g).settings.mode != 'hardcore'
           && request.resource.data.keys().hasOnly(['uid'])
           && request.resource.data.uid == request.auth.uid;

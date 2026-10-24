@@ -16,9 +16,9 @@ import { findDuplicateGroups, burnPlan, burnedKeys } from "./originality.js";
 import { connectChat } from "./chat.js";
 import { Reel, SPIN_MS } from "./reel.js";
 import {
-  PHASE, PHASE_LABEL, MODE_LABEL, deckSize, freshThemes, shuffle, pickRandom, standings, leadersTie, DEFAULT_THEMES,
+  PHASE, PHASE_LABEL, MODE_LABEL, deckSize, freshThemes, roundsLeft, lateJoinOpen, lateJoinScore, shuffle, pickRandom, standings, leadersTie, DEFAULT_THEMES,
 } from "./game-logic.js";
-import { $, esc, patch, fmtCountdown, sourceLabel, standingsHTML, originalityHTML, tableHTML, flipClass, plural, CARDS } from "./ui.js";
+import { $, esc, patch, fmtCountdown, sourceLabel, standingsHTML, originalityHTML, tableHTML, flipClass, plural, CARDS, POINTS } from "./ui.js";
 
 const els = {
   auth: $("#auth"), control: $("#control"), stage: $("#stage"), reel: $("#reel"), top: $("#top-stage"),
@@ -186,27 +186,97 @@ async function verify({ uid, token }) {
 
 async function seat(uid, ref, user, reject) {
   const existing = S.players.find((p) => p.login === user.login);
+  const seatedNow = (p) => p.status === "active" || p.status === "pending";
   // Той самий браузер повернувся (перезавантажив сторінку) — місце вже його.
-  if (existing && existing.uid === uid && existing.status === "active") { await deleteDoc(ref); return; }
-  if (existing && existing.uid !== uid && existing.status === "active") {
+  if (existing && existing.uid === uid && seatedNow(existing)) { await deleteDoc(ref); return; }
+  if (existing && existing.uid !== uid && seatedNow(existing)) {
     return reject("Цей Twitch-акаунт уже в грі з іншого браузера", user.login);
   }
   if (accountAgeDays(user.created_at) < MIN_ACCOUNT_AGE_DAYS) {
     return reject(`Акаунту має бути щонайменше ${MIN_ACCOUNT_AGE_DAYS} дні`, user.login);
   }
-  if (S.game?.phase !== PHASE.LOBBY) return reject("Гра вже почалась", user.login); // TODO: вхід посеред гри
+  const late = S.game?.phase !== PHASE.LOBBY;
+  if (late && !lateJoinOpen(S.game, S.players, MAX_PLAYERS)) {
+    return reject("Вхід у цю гру вже закрито: лишилось замало раундів або немає місць", user.login);
+  }
   // S.players оновлюється із затримкою, тож рахуємо й тих, кого щойно посадили.
-  const taken = new Set([...activePlayers().map((p) => p.uid), ...justSeated]);
+  const taken = new Set([...S.players.filter(seatedNow).map((p) => p.uid), ...justSeated]);
   taken.delete(uid);
-  if (taken.size >= MAX_PLAYERS) return reject("Лобі заповнене", user.login);
+  if (taken.size >= MAX_PLAYERS) return reject(late ? "Немає вільних місць" : "Лобі заповнене", user.login);
 
   justSeated.add(uid);
-  await setDoc(gref("players", uid), {
+  const base = {
     login: user.login, displayName: user.display_name, avatar: user.profile_image_url,
-    score: 0, status: "active", ready: false, cardCount: 0, joinedRound: S.game.round, joinedAt: serverTimestamp(),
-  });
+    score: 0, ready: false, cardCount: 0, joinedRound: S.game.round, joinedAt: serverTimestamp(),
+  };
+  if (late) {
+    // Новачок збирає колоду на раунди, що лишились, і входить на старті наступного раунду.
+    const need = roundsLeft(S.game);
+    await setDoc(gref("decks", uid), { cards: [] }); // якщо повертається — колода з нуля
+    await setDoc(gref("players", uid), { ...base, status: "pending", late: true, need });
+    log(`✓ ${user.display_name} приєднується посеред гри (${plural(need, CARDS)})`);
+  } else {
+    await setDoc(gref("players", uid), { ...base, status: "active" });
+    log(`✓ ${user.display_name} приєднався`);
+  }
   await deleteDoc(ref);
-  log(`✓ ${user.display_name} приєднався`);
+}
+
+/** На старті раунду садимо за стіл новачків, які зібрали колоду.
+ *  Рахунок — найнижчий серед активних. У хардкорі збіг треку новачка з будь-якою
+ *  картою гри (у руці чи вже зіграною) спалює обидві карти. */
+async function activateLateJoiners(batch) {
+  const ready = S.players.filter((p) => p.status === "pending" && p.ready && (p.cardCount ?? 0) >= 1);
+  if (!ready.length) return;
+  const score = lateJoinScore(S.players);
+  const hardcore = S.game.settings.mode === "hardcore";
+  const newDecks = new Map();
+  for (const p of ready) newDecks.set(p.uid, (await getDoc(gref("decks", p.uid))).data()?.cards ?? []);
+
+  if (hardcore) {
+    // Усі треки гри: колоди інших гравців (і зіграні карти) + уже згорілі.
+    const owners = new Map(); // key → [{uid, cards}]
+    const others = S.players.filter((p) => !newDecks.has(p.uid) && (p.status === "active" || p.status === "out"));
+    const otherDecks = new Map();
+    for (const p of others) otherDecks.set(p.uid, (await getDoc(gref("decks", p.uid))).data()?.cards ?? []);
+    const add = (uid, c) => { if (!owners.has(c.key)) owners.set(c.key, []); owners.get(c.key).push(uid); };
+    for (const [uid, cards] of otherDecks) cards.forEach((c) => add(uid, c));
+    for (const [uid, cards] of newDecks) cards.forEach((c) => add(uid, c));
+    const burned = new Set(S.game.burned ?? []);
+    const hits = [];
+    for (const [uid, cards] of newDecks) {
+      for (const c of cards) {
+        if (c.used) continue;
+        const shared = (owners.get(c.key) ?? []).some((o) => o !== uid) || burned.has(c.key);
+        if (!shared) continue;
+        hits.push({ uid, key: c.key, title: c.title });
+        burned.add(c.key);
+      }
+    }
+    if (hits.length) {
+      const burnKeys = new Set(hits.map((h) => h.key));
+      const touch = (decks, uid) => {
+        const cards = decks.get(uid);
+        let changed = false;
+        for (const c of cards) if (burnKeys.has(c.key) && !c.used) { c.used = true; c.burned = true; changed = true; }
+        if (!changed) return;
+        batch.set(gref("decks", uid), { cards });
+        batch.update(gref("players", uid), { cardCount: cards.filter((c) => !c.used).length });
+      };
+      for (const uid of otherDecks.keys()) touch(otherDecks, uid);
+      for (const uid of newDecks.keys()) touch(newDecks, uid);
+      batch.update(gref(), { burned: [...burned] });
+      hits.forEach((h) => log(`🔥 Неоригінально: «${h.title}» (новачок ${S.players.find((p) => p.uid === h.uid)?.displayName})`));
+    }
+  }
+  for (const p of ready) {
+    const cards = newDecks.get(p.uid);
+    batch.update(gref("players", p.uid), {
+      status: "active", score, ready: false, activatedRound: S.game.round,
+      cardCount: cards.filter((c) => !c.used).length,
+    });
+    log(`${p.displayName} сідає за стіл з ${plural(score, POINTS)}`);
+  }
 }
 
 // ── Фази гри ────────────────────────────────────────────────
@@ -343,10 +413,13 @@ const A = {
   startRound: () => once("startRound", async () => {
     if (!spunThisRound() || landedSpin !== S.game.spin.id) return;
     const n = S.game.round;
-    await setDoc(gref("rounds", String(n)), { theme: S.game.theme, plays: [], thrown: [], revealed: false });
-    await updateDoc(gref(), {
+    const batch = writeBatch(db);
+    await activateLateJoiners(batch);
+    batch.set(gref("rounds", String(n)), { theme: S.game.theme, plays: [], thrown: [], revealed: false });
+    batch.update(gref(), {
       phase: PHASE.DISCARD, phaseEndsAt: Date.now() + S.game.settings.discardSeconds * 1000,
     });
+    await batch.commit();
   }),
 
   closeDiscard: () => once("closeDiscard", closeDiscard),
@@ -384,8 +457,10 @@ const A = {
 
 /** Гравець натиснув «Вийти» в лобі (status → out): прибираємо його місце й колоду. */
 function cleanupLeftLobby() {
-  if (S.game?.phase !== PHASE.LOBBY) return;
-  for (const p of S.players.filter((x) => x.status === "out")) {
+  if (!S.game) return;
+  // У лобі — усі, хто вийшов; посеред гри — новачки, які вийшли, ще не сівши за стіл.
+  const gone = S.players.filter((x) => x.status === "out" && (S.game.phase === PHASE.LOBBY || (x.late && x.activatedRound == null)));
+  for (const p of gone) {
     once(`leave-${p.uid}`, async () => {
       const batch = writeBatch(db);
       const tracks = await getDocs(query(gcol("tracks"), where("uid", "==", p.uid)));
@@ -846,9 +921,9 @@ function viewSeats() {
   const rows = S.players.slice().sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).map((p) => `<li class="${p.status}">
       ${p.avatar ? `<img src="${esc(p.avatar)}" alt="">` : ""}
       <span class="name">${esc(p.displayName)}</span>
-      <span class="muted small">${S.game.phase === PHASE.LOBBY ? `${p.cardCount}/${deckSize(S.game.settings)} ${p.ready ? "✓ готовий" : ""}` : p.status === "out" ? "вибув" : S.game.phase === PHASE.DISCARD && thrown.has(p.uid) ? `${plural(Math.max(0, (p.cardCount ?? 0) - 1), CARDS)} · кинув` : plural(p.cardCount ?? 0, CARDS)}</span>
+      <span class="muted small">${S.game.phase === PHASE.LOBBY ? `${p.cardCount}/${deckSize(S.game.settings)} ${p.ready ? "✓ готовий" : ""}` : p.status === "pending" ? `новачок · ${p.cardCount ?? 0}/${p.need} ${p.ready ? "✓ сяде з наступного раунду" : ""}` : p.status === "out" ? "вибув" : S.game.phase === PHASE.DISCARD && thrown.has(p.uid) ? `${plural(Math.max(0, (p.cardCount ?? 0) - 1), CARDS)} · кинув` : plural(p.cardCount ?? 0, CARDS)}</span>
       <span class="score">${p.score ?? 0}</span>
-      ${p.status === "active" ? `<button class="x" data-action="kick" data-arg="${esc(p.uid)}" title="Кікнути">×</button>` : ""}
+      ${p.status === "active" || p.status === "pending" ? `<button class="x" data-action="kick" data-arg="${esc(p.uid)}" title="Кікнути">×</button>` : ""}
     </li>`).join("");
   return `<h3>Гравці</h3><ul class="seats">${rows}</ul>`;
 }

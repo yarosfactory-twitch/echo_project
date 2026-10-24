@@ -4,7 +4,7 @@ import {
 } from "./firebase.js";
 import { startLogin, consumeRedirect } from "./twitch.js";
 import { resolveTrack, TrackError, formatTimecode } from "./tracks.js";
-import { PHASE, PHASE_LABEL, deckSize } from "./game-logic.js";
+import { PHASE, PHASE_LABEL, deckSize, lateJoinOpen } from "./game-logic.js";
 import { MAX_PLAYERS } from "./config.js";
 import { Reel } from "./reel.js";
 import { $, esc, patch, fmtCountdown, sourceLabel, tableHTML, standingsHTML, originalityHTML, flipClass } from "./ui.js";
@@ -27,6 +27,9 @@ let roundKey = null;
 
 const gref = (...path) => doc(db, "games", S.gameId, ...path);
 const isClassic = () => S.game?.settings?.mode !== "hardcore";
+/** Розмір колоди: у лобі — для всієї гри, у новачка посеред гри — на раунди, що лишились. */
+const myDeckSize = () => (S.me?.status === "pending" ? S.me.need : deckSize(S.game.settings));
+const isPending = () => S.me?.status === "pending";
 
 // ── Підписки ────────────────────────────────────────────────
 S.uid = (await ensureAnonUser()).uid;
@@ -101,7 +104,7 @@ const actions = {
     await updateDoc(gref("players", S.uid), { cardCount: cards.length, ready: false });
   },
   async toggleReady() {
-    const full = S.deck.length === deckSize(S.game.settings);
+    const full = S.deck.length >= myDeckSize();
     if (!full && !S.me.ready) return;
     await updateDoc(gref("players", S.uid), { ready: !S.me.ready });
   },
@@ -115,7 +118,7 @@ const actions = {
   },
   async pass() { await sendMove("pass"); },
   async leave() {
-    const inLobby = S.game.phase === PHASE.LOBBY;
+    const inLobby = S.game.phase === PHASE.LOBBY || isPending();
     const text = inLobby
       ? "Вийти з лобі? Твоє місце звільниться, а колоду доведеться збирати заново."
       : "Вийти з гри? Ти вибудеш, твої бали лишаться в таблиці, а голосувати в чаті ти зможеш і далі.";
@@ -131,7 +134,7 @@ async function sendMove(type) {
 }
 
 async function addCard(url) {
-  const need = deckSize(S.game.settings);
+  const need = myDeckSize();
   if (!url || S.busy || S.deck.length >= need) return;
   S.busy = true; S.error = ""; render();
   try {
@@ -173,7 +176,7 @@ document.addEventListener("submit", (e) => {
 
 // ── Рендер ──────────────────────────────────────────────────
 function render() {
-  const canLeave = S.me?.status === "active" && S.game && S.game.phase !== PHASE.FINAL;
+  const canLeave = (S.me?.status === "active" || S.me?.status === "pending") && S.game && S.game.phase !== PHASE.FINAL;
   patch(els.me, S.me ? `<span class="chip">${esc(S.me.displayName)} · ${S.me.score ?? 0} б.</span>
     ${canLeave ? `<button class="btn ghost small" data-action="leave">${S.game.phase === PHASE.LOBBY ? "Вийти з лобі" : "Вийти з гри"}</button>` : ""}` : "");
   syncReel();
@@ -197,6 +200,7 @@ function viewMain() {
   if (S.gameId === null) return `<section class="panel center"><h2>Зараз гри немає</h2><p class="muted">Заходь, коли ведучий відкриє лобі на стрімі.</p></section>`;
   if (!S.game) return `<p class="muted">Завантаження…</p>`;
   if (!S.me) return viewJoin();
+  if (isPending() && S.game.phase !== PHASE.FINAL) return viewDeckBuilder() + viewRound();
   if (S.me.status === "out") {
     if (S.game.phase === PHASE.FINAL) return viewFinal();
     if (S.game.phase === PHASE.LOBBY) return `<section class="panel center"><h2>Виходимо з лобі…</h2></section>`;
@@ -227,8 +231,13 @@ function viewJoin() {
   if (r || pendingToken) return JOIN_WAIT_HTML;
   const seats = S.players.filter((p) => p.status === "active").length;
   if (S.game.phase !== PHASE.LOBBY) {
-    // TODO: вхід посеред гри (місця, N карт на решту раундів, найнижчий рахунок).
-    return `<section class="panel center"><h2>Гра вже йде</h2><p class="muted">Голосуй у чаті номером треку.</p></section>${viewRound()}`;
+    if (!lateJoinOpen(S.game, S.players, MAX_PLAYERS)) {
+      return `<section class="panel center"><h2>Гра вже йде</h2><p class="muted">Вхід у цю гру закрито. Голосуй у чаті номером треку.</p></section>${viewRound()}`;
+    }
+    return `<section class="panel center"><h2>Гра вже йде, але ще можна приєднатися</h2>
+      <p class="muted">Збереш колоду на раунди, що лишились, і сядеш за стіл з наступного раунду з найнижчим рахунком.</p>
+      ${S.error ? `<p class="error">${esc(S.error)}</p>` : ""}
+      <button class="btn primary" data-action="join">Увійти через Twitch</button></section>${viewRound()}`;
   }
   if (seats >= MAX_PLAYERS) return `<section class="panel center"><h2>Лобі заповнене</h2><p class="muted">Голосуй у чаті, коли почнеться раунд.</p></section>`;
   return `<section class="panel center"><h2>Приєднатися до гри</h2>
@@ -238,7 +247,7 @@ function viewJoin() {
 }
 
 function viewDeckBuilder() {
-  const need = deckSize(S.game.settings);
+  const need = myDeckSize();
   const deck = S.deck ?? [];
   const slots = [];
   for (let i = 0; i < need; i++) {
@@ -248,9 +257,10 @@ function viewDeckBuilder() {
           <button class="x" data-action="removeCard" data-arg="${esc(c.key)}" title="Прибрати">×</button></li>`
       : `<li class="sleeve empty">порожня карта</li>`);
   }
-  const full = deck.length === need;
+  const full = deck.length >= need;
   return `<section class="panel">
     <h2>Твоя колода <span class="muted">${deck.length} / ${need}</span></h2>
+    ${isPending() ? `<p class="hint">Гра вже йде: збери ${need} карт і натисни «Готовий». Ти сядеш за стіл на старті наступного раунду з найнижчим рахунком серед гравців.</p>` : ""}
     <p class="muted">Теми невідомі заздалегідь, тож бери різні треки. YouTube або SoundCloud.</p>
     <p class="muted small">Хочеш, щоб трек грав з певного моменту? Встав посилання з таймкодом: на YouTube «Поділитися → Почати з», на SoundCloud «Share → At».</p>
     <p class="muted small">${isClassic()
@@ -264,6 +274,7 @@ function viewDeckBuilder() {
     <ul class="deck">${slots.join("")}</ul>
     <button class="btn ${S.me.ready ? "" : "primary"}" data-action="toggleReady" ${!full && !S.me.ready ? "disabled" : ""}>
       ${S.me.ready ? "Я не готовий" : "Готовий"}</button>
+    ${isPending() && S.me.ready ? `<p class="muted small">Чекаємо старту наступного раунду…</p>` : ""}
   </section>`;
 }
 

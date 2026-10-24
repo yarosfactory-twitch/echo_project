@@ -80,6 +80,27 @@ export function lateJoinScore(players) {
   return active.length ? Math.min(...active.map((p) => p.score ?? 0)) : 0;
 }
 
+/** Скільки раундів ще не почалось (у них може зіграти новачок). */
+export function roundsLeft(game) {
+  const started = ["discard", "listen", "vote", "results", "tiebreak", "final"].includes(game.phase)
+    ? game.round
+    : game.phase === "originality" ? 0 : Math.max(0, game.round - 1);
+  return Math.max(0, game.settings.rounds - started);
+}
+
+/** Вхід посеред гри відкритий, поки в руках гравців більше 3 карт і є вільне місце. */
+export const LATE_JOIN_MIN_HAND = 3;
+export function lateJoinOpen(game, players, maxPlayers) {
+  if (!game || ["lobby", "tiebreak", "final"].includes(game.phase)) return false;
+  if (roundsLeft(game) < 1) return false;
+  const active = players.filter((p) => p.status === "active");
+  if (!active.length) return false;
+  const seated = players.filter((p) => p.status === "active" || p.status === "pending").length;
+  if (seated >= maxPlayers) return false;
+  const maxHand = Math.max(...active.map((p) => p.cardCount ?? 0));
+  return maxHand > LATE_JOIN_MIN_HAND;
+}
+
 /** Ціна плюшки: відсоток від балів, вгору, мінімум 1. */
 export const shopPrice = (score, percent) => Math.max(1, Math.ceil((score * percent) / 100));
 
