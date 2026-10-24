@@ -70,8 +70,14 @@ function markLive(prev, next) {
   if (next.wheel?.id && next.wheel.id !== prev.wheel?.id) liveSpins.add(next.wheel.id);
 }
 /** Перемога: конфеті (і фанфари на сторінці ведучого), лише коли фінал настав наживо. */
+const celebrated = new Set(); // id ігор, для яких конфеті вже було
 function celebrate(prev, next) {
-  if (!prev || !next || prev.phase === next.phase || next.phase !== "final") return;
+  if (!next || next.phase !== "final") return;
+  // Наживо (фаза щойно змінилась) або сторінку відкрили/перезавантажили в перші 15 с фіналу.
+  const live = prev && prev.phase !== "final";
+  const recent = Date.now() - (next.finalAt ?? 0) < 15000;
+  if (!(live || recent) || celebrated.has(S.gameId)) return;
+  celebrated.add(S.gameId);
   setTimeout(() => { fireConfetti(); playSfx("fanfare", 0.6); }, 150);
 }
 const isFresh = (x) => liveSpins.has(x.id) || Date.now() - (x.at ?? 0) < x.ms + 1500;
@@ -483,6 +489,8 @@ const A = {
     log(`Платівка обрала переможця: ${winner.displayName}`);
     await finalize(winner.uid);
   }),
+
+  confetti: () => { fireConfetti(); playSfx("fanfare", 0.6); },
 
   closeShop: () => once("closeShop", async () => {
     await updateDoc(gref(), { phase: PHASE.SPIN });
@@ -984,7 +992,7 @@ async function writeFinal(winnerUid) {
     .sort((a, b) => a.n - b.n)
     .map((r) => ({ n: r.n, theme: r.theme, plays: r.plays.map(({ slot, source, url, title, displayName, login, votes }) => ({ slot, source, url, title, displayName, login, votes })) }));
   await setDoc(doc(db, "history", S.gameId), { finishedAt: serverTimestamp(), players: final, rounds });
-  await updateDoc(gref(), { phase: PHASE.FINAL, final, phaseEndsAt: null, nowPlaying: null });
+  await updateDoc(gref(), { phase: PHASE.FINAL, final, phaseEndsAt: null, nowPlaying: null, finalAt: Date.now() });
   log("Гру завершено");
 }
 
@@ -1253,7 +1261,7 @@ function viewControl() {
       body = `<p class="muted">Нічия (гра почалась до оновлення).</p>${b("randomWinner", "Почати тай-брейк", { primary: true })}`;
       break;
     case PHASE.FINAL:
-      body = "";
+      body = `<p class="muted">Вітаємо переможця!</p>${b("confetti", "🎉 Конфеті ще раз")}`;
       break;
   }
   return `<section class="panel"><h2>${esc(PHASE_LABEL[g.phase])}${g.tiebreak ? " · тай-брейк" : g.round ? ` · раунд ${g.round}/${g.settings.rounds}` : ""}</h2>
@@ -1320,7 +1328,19 @@ function shopStageHTML() {
   }).join("");
   return `<h1 class="final-title">Магазин</h1>
     <p class="hint">Бали — це і рахунок, і гроші. Купуй на сайті до обертання барабана</p>
-    <ul class="shop-log">${rows || `<li class="muted">Поки ніхто нічого не купив</li>`}</ul>`;
+    <ul class="shop-log">${rows || `<li class="muted">Поки ніхто нічого не купив</li>`}</ul>
+    ${shopReadyHTML()}`;
+}
+
+/** Хто з гравців уже натиснув «Готовий» у магазині. */
+function shopReadyHTML() {
+  const ps = activePlayers();
+  if (!ps.length) return "";
+  const ready = ps.filter((p) => shopReady(p)).length;
+  const chips = ps.map((p) => `<li class="${shopReady(p) ? "ready" : ""}">
+      ${p.avatar ? `<img class="avatar" src="${esc(p.avatar)}" alt="">` : `<span class="avatar empty">${esc((p.displayName || "?").slice(0, 1).toUpperCase())}</span>`}
+      <span class="who">${esc(p.displayName)}</span><span class="state">${shopReady(p) ? "✓ готовий" : "купує…"}</span></li>`).join("");
+  return `<h3 class="standings-title center">Готові: ${ready} / ${ps.length}</h3><ul class="ready-list">${chips}</ul>`;
 }
 
 /** Сцена тай-брейку: хто з учасників уже вставив трек. */

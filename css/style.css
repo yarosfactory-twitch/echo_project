@@ -512,3 +512,12 @@ select { font: 1rem var(--sans); color: var(--cream); background: rgba(0,0,0,.35
 /* ── Магазин: готовність ───────────────── */
 .shop-ready { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: center; margin-top: 14px; }
 .shop.locked .shop-item { opacity: .5; }
+
+/* ── Готовність у магазині (сцена ведучого) ── */
+.ready-list { list-style: none; padding: 0; margin: 8px auto; max-width: 640px; display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+.ready-list li { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-radius: 999px; background: rgba(0,0,0,.25); border: 1px solid rgba(212,169,74,.2); }
+.ready-list li.ready { border-color: var(--ok); background: rgba(127,209,160,.12); }
+.ready-list .avatar { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; display: inline-flex; align-items: center; justify-content: center; background: var(--felt-2); font-weight: 800; }
+.ready-list .who { font-weight: 700; }
+.ready-list .state { color: var(--muted); font-size: .85rem; }
+.ready-list li.ready .state { color: var(--ok); font-weight: 700; }

@@ -47,8 +47,14 @@ function markLive(prev, next) {
   if (next.wheel?.id && next.wheel.id !== prev.wheel?.id) liveSpins.add(next.wheel.id);
 }
 /** Перемога: конфеті, лише коли фінал настав наживо (не при відкритті сторінки). Звук — зі стріму. */
+const celebrated = new Set(); // id ігор, для яких конфеті вже було
 function celebrate(prev, next) {
-  if (!prev || !next || prev.phase === next.phase || next.phase !== "final") return;
+  if (!next || next.phase !== "final") return;
+  // Наживо (фаза щойно змінилась) або сторінку відкрили/перезавантажили в перші 15 с фіналу.
+  const live = prev && prev.phase !== "final";
+  const recent = Date.now() - (next.finalAt ?? 0) < 15000;
+  if (!(live || recent) || celebrated.has(S.gameId)) return;
+  celebrated.add(S.gameId);
   setTimeout(fireConfetti, 150);
 }
 const isFresh = (x) => liveSpins.has(x.id) || Date.now() - (x.at ?? 0) < x.ms + 1500;
