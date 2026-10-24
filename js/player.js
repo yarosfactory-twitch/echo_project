@@ -147,7 +147,7 @@ const actions = {
   async discard() { await sendMove("discard"); },
   async buy(arg) {
     const [item, extra] = String(arg).split(":");
-    if (S.game.phase !== PHASE.SHOP || S.me?.status !== "active" || S.busy) return;
+    if (S.game.phase !== PHASE.SHOP || S.me?.status !== "active" || S.busy || iAmShopReady()) return;
     const data = { uid: S.uid, item, arg: extra ?? null, card: null, at: serverTimestamp() };
     S.error = "";
     if (item === "swap" || item === "extraCard") {
@@ -527,6 +527,7 @@ function viewShop() {
   if (me.status !== "active") return `<section class="panel center"><h2>Магазин</h2><p class="muted">Купувати можуть гравці за столом.</p></section>`;
   const prices = S.game.settings.prices ?? {};
   const score = me.score ?? 0;
+  const locked = iAmShopReady();
   const mine = S.myShop.slice().sort((a, b) => (b.at?.seconds ?? 0) - (a.at?.seconds ?? 0));
   const hasQueue = mine.some((r) => r.item === "queue" && r.status === "ok");
   const hand = (S.deck ?? []).filter((c) => !c.used);
@@ -534,7 +535,7 @@ function viewShop() {
   const cards = SHOP_ITEMS.map((item) => {
     const price = priceOf(score, prices[item.pct]);
     const poor = score < price;
-    const off = poor || S.busy;
+    const off = poor || S.busy || locked; // після «Готовий» магазин для гравця заблокований
     let action = "";
     if (item.id === "queue") {
       action = hasQueue ? `<span class="muted small">куплено</span>`
@@ -546,11 +547,11 @@ function viewShop() {
       action = `<button class="btn" data-action="buy" data-arg="respin" ${off ? "disabled" : ""}>Купити</button>${me.tokens ? `<span class="muted small">у тебе: ${me.tokens}</span>` : ""}`;
     } else if (item.id === "swap") {
       const opts = hand.map((c) => `<option value="${esc(c.key)}" ${d.swapKey === c.key ? "selected" : ""}>${esc(c.title)}</option>`).join("");
-      action = `<select data-draft="swapKey"><option value="">— яку карту замінити —</option>${opts}</select>
-        <input data-draft="swapUrl" type="url" placeholder="Посилання на новий трек" value="${esc(d.swapUrl)}">
+      action = `<select data-draft="swapKey" ${locked ? "disabled" : ""}><option value="">— яку карту замінити —</option>${opts}</select>
+        <input data-draft="swapUrl" type="url" placeholder="Посилання на новий трек" value="${esc(d.swapUrl)}" ${locked ? "disabled" : ""}>
         <button class="btn" data-action="buy" data-arg="swap" ${off || !hand.length ? "disabled" : ""}>Замінити</button>`;
     } else if (item.id === "extraCard") {
-      action = `<input data-draft="extraUrl" type="url" placeholder="Посилання на новий трек" value="${esc(d.extraUrl)}">
+      action = `<input data-draft="extraUrl" type="url" placeholder="Посилання на новий трек" value="${esc(d.extraUrl)}" ${locked ? "disabled" : ""}>
         <button class="btn" data-action="buy" data-arg="extraCard" ${off ? "disabled" : ""}>Додати</button>`;
     }
     return `<li class="shop-item ${poor ? "poor" : ""}">
@@ -566,7 +567,8 @@ function viewShop() {
     <h2>Магазин <span class="muted">у тебе ${plural(score, POINTS)}</span></h2>
     <p class="muted small">Бали — це і рахунок, і гроші. Ціна — відсоток від твоїх балів (мінімум 1). Купувати можна, поки ведучий не закрив магазин.</p>
     ${S.error ? `<p class="error">${esc(S.error)}</p>` : ""}
-    <ul class="shop">${cards}</ul>
+    ${locked ? `<p class="hint">Ти готовий — покупки заблоковано. Передумав? Натисни «Ще хочу щось купити».</p>` : ""}
+    <ul class="shop${locked ? " locked" : ""}">${cards}</ul>
     ${log ? `<h3>Твої покупки</h3><ul class="shop-mine">${log}</ul>` : ""}
     <div class="shop-ready">
       <button class="btn ${iAmShopReady() ? "" : "primary"}" data-action="shopReady">${iAmShopReady() ? "Ще хочу щось купити" : "Готовий"}</button>

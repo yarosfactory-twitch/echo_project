@@ -872,6 +872,7 @@ async function handlePurchase(req) {
   const item = itemById(req.item);
   const reject = (reason) => updateDoc(reqRef, { status: "rejected", reason });
   if (!p || p.status !== "active") return reject("Купувати можуть лише гравці за столом");
+  if (shopReady(p)) return reject("Ти вже натиснув «Готовий»");
   if (!item) return reject("Невідома плюшка");
   // Актуальний рахунок: з бази, бо кілька покупок поспіль змінюють бали.
   const fresh = (await getDoc(gref("players", p.uid))).data() ?? p;

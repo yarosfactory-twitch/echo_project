@@ -511,3 +511,4 @@ select { font: 1rem var(--sans); color: var(--cream); background: rgba(0,0,0,.35
 
 /* ── Магазин: готовність ───────────────── */
 .shop-ready { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: center; margin-top: 14px; }
+.shop.locked .shop-item { opacity: .5; }
