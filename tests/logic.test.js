@@ -32,7 +32,7 @@ test("SoundCloud: нормалізація адреси і id з html вбудо
   assert.equal(extractSoundCloudId(html), "123456");
   assert.equal(extractSoundCloudId("api.soundcloud.com/playlists/99"), null);
   assert.match(embedUrl({ source: "soundcloud", id: "123456" }), /tracks%2F123456/);
-  assert.equal(embedUrl({ source: "youtube", id: "dQw4w9WgXcQ" }), "https://www.youtube.com/embed/dQw4w9WgXcQ?autoplay=1&rel=0");
+  assert.equal(embedUrl({ source: "youtube", id: "dQw4w9WgXcQ" }), "https://www.youtube.com/embed/dQw4w9WgXcQ?autoplay=1&rel=0&enablejsapi=1");
 });
 
 test("Голос — лише число в межах кількості треків", () => {
