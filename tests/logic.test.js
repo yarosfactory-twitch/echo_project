@@ -82,3 +82,10 @@ test("Ціни магазину і розмір колоди", () => {
   const s = shuffle([1, 2, 3, 4, 5]);
   assert.deepEqual([...s].sort(), [1, 2, 3, 4, 5]);
 });
+
+import { landingRow } from "../js/reel.js";
+test("Барабан зупиняється на обраному рядку в передостанній копії", () => {
+  // 2 рядки «хвоста» зверху + 10 повних копій по 7 тем + індекс цілі
+  assert.equal(landingRow(7, 3), 2 + 10 * 7 + 3);
+  assert.equal(landingRow(1, 0), 2 + 10);
+});

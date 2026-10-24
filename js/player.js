@@ -6,6 +6,7 @@ import { startLogin, consumeRedirect } from "./twitch.js";
 import { resolveTrack, TrackError } from "./tracks.js";
 import { PHASE, PHASE_LABEL, deckSize } from "./game-logic.js";
 import { MAX_PLAYERS } from "./config.js";
+import { Reel } from "./reel.js";
 import { $, esc, patch, fmtCountdown, sourceLabel, fanHTML, podiumHTML, originalityHTML } from "./ui.js";
 
 const els = { me: $("#me"), status: $("#status"), main: $("#main"), table: $("#table") };
@@ -18,6 +19,8 @@ const S = {
 };
 
 let pendingToken = consumeRedirect();
+const reel = new Reel($("#reel")); // гравці бачать обертання, звук іде зі стріму
+let landedSpin = null;
 let gameSubs = [];
 let roundSubs = [];
 let roundKey = null;
@@ -164,6 +167,7 @@ function render() {
   const canLeave = S.me?.status === "active" && S.game && S.game.phase !== PHASE.FINAL;
   patch(els.me, S.me ? `<span class="chip">${esc(S.me.displayName)} · ${S.me.score ?? 0} б.</span>
     ${canLeave ? `<button class="btn ghost small" data-action="leave">${S.game.phase === PHASE.LOBBY ? "Вийти з лобі" : "Вийти з гри"}</button>` : ""}` : "");
+  syncReel();
   patch(els.status, viewStatus());
   patch(els.main, viewMain());
   patch(els.table, viewTable());
@@ -175,7 +179,8 @@ function viewStatus() {
   if (!S.game) return "";
   const g = S.game;
   const round = g.round ? ` · раунд ${g.round} з ${g.settings.rounds}` : "";
-  const theme = g.theme ? `<div class="theme">${esc(g.theme)}</div>` : "";
+  const showTheme = g.theme && (g.phase !== PHASE.SPIN || landedSpin === g.spin?.id);
+  const theme = showTheme ? `<div class="theme">${esc(g.theme)}</div>` : "";
   return `<div class="phase">${esc(PHASE_LABEL[g.phase] ?? g.phase)}${round}</div>${theme}<div id="countdown" class="countdown"></div>`;
 }
 
@@ -195,6 +200,11 @@ function viewMain() {
     case PHASE.LISTEN: case PHASE.VOTE: case PHASE.RESULTS: return viewRound();
     case PHASE.FINAL: return viewFinal();
     case PHASE.TIEBREAK: return `<section class="panel center"><h2>Нічия!</h2><p class="muted">Ведучий визначає переможця.</p></section>`;
+    case PHASE.SPIN: {
+      const spun = S.game.spin?.round === S.game.round;
+      const text = !spun ? "Зараз ведучий крутитиме барабан тем" : landedSpin === S.game.spin.id ? "Тема обрана. Чекаємо, поки ведучий почне раунд" : "Барабан крутиться…";
+      return `<section class="panel center"><p class="muted">${text}</p></section>`;
+    }
     default: return `<section class="panel center"><p class="muted">Ведучий готує наступний раунд…</p></section>`;
   }
 }
@@ -303,6 +313,15 @@ function viewTable() {
       ${showThrown && thrown.has(p.uid) ? `<span class="sleeve back thrown"></span>` : ""}
     </div>`).join("");
   return `<div class="felt-table"><div class="center-pile">${showThrown ? `${thrown.size} карт у центрі` : ""}</div>${seatHTML}</div>`;
+}
+
+function syncReel() {
+  const g = S.game;
+  if (!g || g.phase !== PHASE.SPIN) { reel.hide(); return; }
+  if (g.spin?.round !== g.round) { reel.idle(g.themesLeft ?? []); return; }
+  // Сторінку відкрили вже після обертання — одразу показуємо результат.
+  const fresh = Date.now() - (g.spin.at ?? 0) < g.spin.ms + 1500;
+  reel.spin(g.spin, fresh, () => { landedSpin = g.spin.id; render(); });
 }
 
 // ── Очікування входу: кільце прогресу навколо платівки ──────

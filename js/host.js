@@ -14,13 +14,14 @@ import { embedUrl } from "./tracks.js";
 import { VoteCollector } from "./votes.js";
 import { findDuplicateGroups, burnPlan, burnedKeys } from "./originality.js";
 import { connectChat } from "./chat.js";
+import { Reel, SPIN_MS } from "./reel.js";
 import {
   PHASE, PHASE_LABEL, MODE_LABEL, deckSize, shuffle, pickRandom, standings, leadersTie, DEFAULT_THEMES,
 } from "./game-logic.js";
 import { $, esc, patch, fmtCountdown, sourceLabel, podiumHTML, originalityHTML } from "./ui.js";
 
 const els = {
-  auth: $("#auth"), control: $("#control"), stage: $("#stage"),
+  auth: $("#auth"), control: $("#control"), stage: $("#stage"), reel: $("#reel"),
   player: $("#player"), seats: $("#seats"), log: $("#log"),
 };
 
@@ -37,6 +38,8 @@ const S = {
   },
 };
 const busy = new Set();
+const reel = new Reel(els.reel, { sound: true }); // звук обертання йде лише зі сторінки ведучого
+let landedSpin = null; // id обертання, яке вже зупинилось (до цього тему не показуємо)
 let gameSubs = [];
 let roundSubs = [];
 let roundKey = null;
@@ -284,18 +287,28 @@ const A = {
     log(`Згоріло карт: ${total}. Гра почалась`);
   }),
 
-  // TODO: горизонтальна карусель тем, як на сторінці фільмів. Результат уже обрано тут.
-  // TODO: жетон «Повторне обертання» (10 секунд після обертання).
+  // Барабан: результат обирається тут, клієнти лише анімують до нього.
+  // TODO: жетон «Повторне обертання» (10 секунд після зупинки) — новий spin з тим самим раундом.
   spin: () => once("spin", async () => {
+    if (spunThisRound()) return;
     const left = S.game.themesLeft ?? [];
     if (!left.length) { log("⚠ Теми закінчились, додай нові в пул"); return; }
     const theme = pickRandom(left);
+    const list = shuffle(left);
     const n = S.game.round;
-    await setDoc(gref("rounds", String(n)), { theme, plays: [], thrown: [], revealed: false });
     await updateDoc(gref(), {
       theme, themesLeft: left.filter((t) => t !== theme),
-      phase: PHASE.DISCARD, phaseEndsAt: Date.now() + S.game.settings.discardSeconds * 1000,
+      spin: { id: `${n}-${Date.now()}`, round: n, list, target: list.indexOf(theme), ms: SPIN_MS, at: Date.now() },
       nowPlaying: null, revealed: [],
+    });
+  }),
+
+  startRound: () => once("startRound", async () => {
+    if (!spunThisRound() || landedSpin !== S.game.spin.id) return;
+    const n = S.game.round;
+    await setDoc(gref("rounds", String(n)), { theme: S.game.theme, plays: [], thrown: [], revealed: false });
+    await updateDoc(gref(), {
+      phase: PHASE.DISCARD, phaseEndsAt: Date.now() + S.game.settings.discardSeconds * 1000,
     });
   }),
 
@@ -344,6 +357,17 @@ function cleanupLeftLobby() {
       log(`${p.displayName} вийшов з лобі`);
     });
   }
+}
+
+const spunThisRound = () => S.game?.spin?.round === S.game?.round;
+
+/** Барабан видно лише у фазі колеса. До обертання — спокійний список тем. */
+function syncReel() {
+  const g = S.game;
+  if (!g || g.phase !== PHASE.SPIN) { reel.hide(); return; }
+  if (!spunThisRound()) { reel.idle(g.themesLeft ?? []); return; }
+  const fresh = Date.now() - (g.spin.at ?? 0) < g.spin.ms + 1500;
+  reel.spin(g.spin, fresh, () => { landedSpin = g.spin.id; render(); });
 }
 
 function canStart() {
@@ -538,7 +562,8 @@ function updatePlayer() {
 // ── Рендер ──────────────────────────────────────────────────
 function render() {
   patch(els.auth, viewAuth());
-  if (!isHost()) { ["control", "stage", "seats", "log"].forEach((k) => patch(els[k], "")); return; }
+  if (!isHost()) { ["control", "stage", "seats", "log"].forEach((k) => patch(els[k], "")); reel.hide(); return; }
+  syncReel();
   patch(els.control, viewControl());
   patch(els.stage, viewStage());
   patch(els.seats, viewSeats());
@@ -615,9 +640,16 @@ function viewControl() {
     case PHASE.SHOP:
       body = `<p class="muted">Магазин ще в розробці.</p>${b("toSpin", "До колеса", { primary: true })}`;
       break;
-    case PHASE.SPIN:
-      body = `<p class="muted">Тем лишилось: ${(g.themesLeft ?? []).length}</p>${b("spin", "Крутити колесо", { primary: true })}`;
+    case PHASE.SPIN: {
+      const spun = spunThisRound();
+      const landed = spun && landedSpin === g.spin.id;
+      body = !spun
+        ? `<p class="muted">Тем у барабані: ${(g.themesLeft ?? []).length}</p>${b("spin", "Крутити барабан", { primary: true, disabled: !(g.themesLeft ?? []).length })}`
+        : landed
+          ? `<p class="muted">Тема обрана. Прокоментуй і запускай раунд.</p>${b("startRound", "Почати раунд", { primary: true })}`
+          : `<p class="muted">Барабан крутиться…</p>${b("startRound", "Почати раунд", { disabled: true })}`;
       break;
+    }
     case PHASE.DISCARD:
       body = `<p class="muted">Скинули: ${S.moves.length} / ${activePlayers().filter(hasCards).length}</p>${b("closeDiscard", "Завершити скидання зараз")}`;
       break;
@@ -658,8 +690,9 @@ function viewStage() {
   }).join("");
   const voteInfo = g.phase === PHASE.VOTE
     ? `<p class="hint">Пиши в чат номер треку · голосів: ${S.collector?.voterCount ?? 0}</p>` : "";
+  const showTheme = g.theme && (g.phase !== PHASE.SPIN || landedSpin === g.spin?.id);
   return `<div class="stage-head"><div class="phase">${esc(PHASE_LABEL[g.phase])}</div>
-      ${g.theme ? `<div class="theme big">${esc(g.theme)}</div>` : ""}<div id="countdown" class="countdown"></div></div>
+      ${showTheme ? `<div class="theme big">${esc(g.theme)}</div>` : ""}<div id="countdown" class="countdown"></div></div>
     ${voteInfo}${plays.length ? `<ul class="deck plays">${cards}</ul>` : ""}`;
 }
 
