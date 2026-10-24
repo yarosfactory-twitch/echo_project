@@ -1,13 +1,16 @@
 // Сторінка гравця (index.html).
 import {
   db, ensureAnonUser, doc, collection, onSnapshot, setDoc, updateDoc, deleteDoc, serverTimestamp,
+  addDoc, query, where,
 } from "./firebase.js";
 import { startLogin, consumeRedirect } from "./twitch.js";
 import { resolveTrack, TrackError, formatTimecode } from "./tracks.js";
 import { PHASE, PHASE_LABEL, deckSize, lateJoinOpen } from "./game-logic.js";
 import { MAX_PLAYERS } from "./config.js";
 import { Reel } from "./reel.js";
-import { $, esc, patch, fmtCountdown, sourceLabel, tableHTML, standingsHTML, originalityHTML, flipClass } from "./ui.js";
+import { VinylWheel } from "./wheel.js";
+import { SHOP_ITEMS, priceOf, RESPIN_WINDOW_MS } from "./shop.js";
+import { $, esc, patch, fmtCountdown, sourceLabel, tableHTML, standingsHTML, originalityHTML, flipClass, plural, POINTS } from "./ui.js";
 
 const els = { me: $("#me"), status: $("#status"), main: $("#main"), table: $("#table") };
 
@@ -16,11 +19,17 @@ const S = {
   request: undefined, // undefined = ще не знаємо, null = заявки немає
   deck: null, round: null, move: null, myVote: null,
   busy: false, error: "", selected: null,
+  myShop: [], tbSub: null, respinSent: null,
+  // Чернетки полів (patch() перемальовує розмітку й інакше губить введене).
+  draft: { swapKey: "", swapUrl: "", extraUrl: "", tbUrl: "" },
 };
 
 let pendingToken = consumeRedirect();
 const reel = new Reel($("#reel")); // гравці бачать обертання, звук іде зі стріму
+const wheel = new VinylWheel($("#wheel"));
 let landedSpin = null;
+let landedSpinAt = 0;
+let landedWheel = null;
 let gameSubs = [];
 let roundSubs = [];
 let roundKey = null;
@@ -68,6 +77,7 @@ function syncRound() {
   if (key === roundKey) return;
   roundSubs.forEach((off) => off());
   roundSubs = []; roundKey = key; S.round = null; S.move = null; S.selected = null; S.myVote = null;
+  S.myShop = []; S.tbSub = null;
   if (!n) return;
   roundSubs.push(
     onSnapshot(gref("rounds", String(n)), (s) => { S.round = s.data() ?? null; render(); }),
@@ -77,6 +87,12 @@ function syncRound() {
     onSnapshot(gref("rounds", String(n), "votes", S.uid),
       (s) => { S.myVote = s.data()?.slot ?? null; render(); },
       () => { S.myVote = null; }),
+    onSnapshot(query(collection(db, "games", S.gameId, "rounds", String(n), "shop"), where("uid", "==", S.uid)),
+      (s) => { S.myShop = s.docs.map((d) => ({ id: d.id, ...d.data() })); render(); },
+      () => { S.myShop = []; }),
+    onSnapshot(gref("rounds", String(n), "tb", S.uid),
+      (s) => { S.tbSub = s.data() ?? null; render(); },
+      () => { S.tbSub = null; }),
   );
 }
 
@@ -110,6 +126,55 @@ const actions = {
   },
   select(key) { S.selected = key; render(); },
   async discard() { await sendMove("discard"); },
+  async buy(arg) {
+    const [item, extra] = String(arg).split(":");
+    if (S.game.phase !== PHASE.SHOP || S.me?.status !== "active" || S.busy) return;
+    const data = { uid: S.uid, item, arg: extra ?? null, card: null, at: serverTimestamp() };
+    S.error = "";
+    if (item === "swap" || item === "extraCard") {
+      const url = item === "swap" ? S.draft.swapUrl : S.draft.extraUrl;
+      if (item === "swap" && !S.draft.swapKey) { S.error = "Обери карту, яку замінити"; render(); return; }
+      if (!url) { S.error = "Встав посилання на новий трек"; render(); return; }
+      S.busy = true; render();
+      try {
+        const track = await resolveTrack(url);
+        if ((S.deck ?? []).some((c) => c.key === track.key)) throw new TrackError("Цей трек уже є у твоїй колоді");
+        data.card = { key: track.key, source: track.source, id: track.id ?? null, embed: track.embed ?? null, url: track.url, title: track.title, author: track.author ?? "", start: track.start ?? 0 };
+        if (item === "swap") data.arg = S.draft.swapKey;
+      } catch (e) {
+        S.error = e instanceof TrackError ? e.message : "Не вдалося перевірити трек: " + e.message;
+        S.busy = false; render(); return;
+      }
+      S.busy = false;
+    }
+    await addDoc(collection(db, "games", S.gameId, "rounds", String(S.game.round), "shop"), data);
+    if (item === "swap") { S.draft.swapUrl = ""; S.draft.swapKey = ""; }
+    if (item === "extraCard") S.draft.extraUrl = "";
+    render();
+  },
+  async respin() {
+    const g = S.game;
+    if (!canRespin()) return;
+    S.respinSent = g.spin.id; render();
+    await setDoc(gref("rounds", String(g.round), "respin", S.uid), { spinId: g.spin.id, at: serverTimestamp() });
+  },
+  async submitTb() {
+    if (S.game.phase !== PHASE.TB_SUBMIT || !isTied() || S.busy) return;
+    const url = S.draft.tbUrl.trim();
+    if (!url) return;
+    S.busy = true; S.error = ""; render();
+    try {
+      const t = await resolveTrack(url);
+      if ((S.deck ?? []).some((c) => c.key === t.key)) throw new TrackError("Цей трек уже був у твоїй колоді — потрібен новий");
+      await setDoc(gref("rounds", String(S.game.round), "tb", S.uid), {
+        key: t.key, source: t.source, id: t.id ?? null, embed: t.embed ?? null, url: t.url, title: t.title,
+        author: t.author ?? "", start: t.start ?? 0, at: serverTimestamp(),
+      });
+      S.draft.tbUrl = "";
+    } catch (e) {
+      S.error = e instanceof TrackError ? e.message : "Не вдалося надіслати трек: " + e.message;
+    } finally { S.busy = false; render(); }
+  },
   async vote(slot) {
     const n = Number(slot);
     if (S.game.phase !== PHASE.VOTE || !S.me || isMine(playBySlot(n))) return;
@@ -168,6 +233,14 @@ document.addEventListener("click", (e) => {
   if (!btn || btn.disabled) return;
   actions[btn.dataset.action]?.(btn.dataset.arg);
 });
+document.addEventListener("input", (e) => {
+  const f = e.target.dataset?.draft;
+  if (f && f in S.draft) {
+    S.draft[f] = e.target.value;
+    if (f === "swapKey") render();
+  }
+});
+
 document.addEventListener("submit", (e) => {
   if (e.target.id !== "add-form") return;
   e.preventDefault();
@@ -180,6 +253,7 @@ function render() {
   patch(els.me, S.me ? `<span class="chip">${esc(S.me.displayName)} · ${S.me.score ?? 0} б.</span>
     ${canLeave ? `<button class="btn ghost small" data-action="leave">${S.game.phase === PHASE.LOBBY ? "Вийти з лобі" : "Вийти з гри"}</button>` : ""}` : "");
   syncReel();
+  syncWheel();
   patch(els.status, viewStatus());
   patch(els.main, viewMain());
   patch(els.table, viewTable());
@@ -190,10 +264,11 @@ function render() {
 function viewStatus() {
   if (!S.game) return "";
   const g = S.game;
-  const round = g.round ? ` · раунд ${g.round} з ${g.settings.rounds}` : "";
+  const round = g.tiebreak ? ` · тай-брейк` : g.round ? ` · раунд ${g.round} з ${g.settings.rounds}` : "";
   const showTheme = g.theme && (g.phase !== PHASE.SPIN || landedSpin === g.spin?.id);
   const theme = showTheme ? `<div class="theme">${esc(g.theme)}</div>` : "";
-  return `<div class="phase">${esc(PHASE_LABEL[g.phase] ?? g.phase)}${round}</div>${theme}<div id="countdown" class="countdown"></div>`;
+  const notice = g.tiebreak && g.tbNotice?.text ? `<div class="notice">🔥 ${esc(g.tbNotice.text)}</div>` : "";
+  return `${notice}<div class="phase">${esc(PHASE_LABEL[g.phase] ?? g.phase)}${round}</div>${theme}<div id="countdown" class="countdown"></div>`;
 }
 
 function viewMain() {
@@ -203,6 +278,7 @@ function viewMain() {
   if (isPending() && S.game.phase !== PHASE.FINAL) return viewDeckBuilder() + viewRound();
   if (S.me.status === "out") {
     if (S.game.phase === PHASE.FINAL) return viewFinal();
+    if (S.game.phase === PHASE.TB_SUBMIT) return viewTbSubmit();
     if (S.game.phase === PHASE.LOBBY) return `<section class="panel center"><h2>Виходимо з лобі…</h2></section>`;
     return `<section class="panel center"><h2>Ти вибув з гри</h2><p class="muted">Тепер можеш голосувати в чаті за будь-який трек.</p></section>${viewRound()}`;
   }
@@ -213,10 +289,17 @@ function viewMain() {
     case PHASE.LISTEN: case PHASE.VOTE: case PHASE.RESULTS: return viewRound();
     case PHASE.FINAL: return viewFinal();
     case PHASE.TIEBREAK: return `<section class="panel center"><h2>Нічия!</h2><p class="muted">Ведучий визначає переможця.</p></section>`;
+    case PHASE.SHOP: return viewShop();
+    case PHASE.TB_SUBMIT: return viewTbSubmit();
+    case PHASE.WHEEL: return `<section class="panel center"><h2>Знову нічия!</h2><p class="muted">Переможця обере голка на платівці.</p></section>`;
     case PHASE.SPIN: {
       const spun = S.game.spin?.round === S.game.round;
+      const tb = S.game.tiebreak ? `<h2>Нічия! Тай-брейк</h2><p>${esc(tiedNames())}</p>` : "";
       const text = !spun ? "Зараз ведучий крутитиме барабан тем" : landedSpin === S.game.spin.id ? "Тема обрана. Чекаємо, поки ведучий почне раунд" : "Барабан крутиться…";
-      return `<section class="panel center"><p class="muted">${text}</p></section>`;
+      const respin = canRespin()
+        ? `<p><button class="btn primary" data-action="respin">🔄 Перекрутити (жетон: ${S.me.tokens})</button></p><p class="muted small">Залишилось кілька секунд, щоб використати жетон</p>`
+        : S.respinSent === S.game.spin?.id ? `<p class="muted small">Жетон надіслано…</p>` : "";
+      return `<section class="panel center">${tb}<p class="muted">${text}</p>${respin}</section>`;
     }
     default: return `<section class="panel center"><p class="muted">Ведучий готує наступний раунд…</p></section>`;
   }
@@ -347,13 +430,112 @@ function viewTable() {
 const startBadge = (c) => (c.start ? ` · <span class="start">▶ з ${formatTimecode(c.start)}</span>` : "");
 
 
+const tiedNames = () => (S.game?.tiebreak?.tied ?? []).map((uid) => S.players.find((p) => p.uid === uid)?.displayName ?? "?").join(" · ");
+const isTied = () => (S.game?.tiebreak?.tied ?? []).includes(S.uid);
+
+/** Жетон повторного обертання: 10 с після зупинки барабана. */
+function canRespin() {
+  const g = S.game;
+  return g?.phase === PHASE.SPIN && S.me?.status === "active" && (S.me.tokens ?? 0) > 0
+    && g.spin?.round === g.round && landedSpin === g.spin.id && S.respinSent !== g.spin.id
+    && Date.now() - landedSpinAt < RESPIN_WINDOW_MS;
+}
+
+const ITEM_ICON = { queue: "⏭", swap: "🔁", extraCard: "➕", double: "✖2", respin: "🔄" };
+
+function viewShop() {
+  const me = S.me;
+  if (me.status !== "active") return `<section class="panel center"><h2>Магазин</h2><p class="muted">Купувати можуть гравці за столом.</p></section>`;
+  const prices = S.game.settings.prices ?? {};
+  const score = me.score ?? 0;
+  const mine = S.myShop.slice().sort((a, b) => (b.at?.seconds ?? 0) - (a.at?.seconds ?? 0));
+  const hasQueue = mine.some((r) => r.item === "queue" && r.status === "ok");
+  const hasDouble = mine.some((r) => r.item === "double" && r.status === "ok");
+  const hand = (S.deck ?? []).filter((c) => !c.used);
+  const d = S.draft;
+  const cards = SHOP_ITEMS.map((item) => {
+    const price = priceOf(score, prices[item.pct]);
+    const poor = score < price;
+    const off = poor || S.busy;
+    let action = "";
+    if (item.id === "queue") {
+      action = hasQueue ? `<span class="muted small">куплено</span>`
+        : `<button class="btn" data-action="buy" data-arg="queue:first" ${off ? "disabled" : ""}>Першим</button>
+           <button class="btn" data-action="buy" data-arg="queue:last" ${off ? "disabled" : ""}>Останнім</button>`;
+    } else if (item.id === "double") {
+      action = hasDouble ? `<span class="muted small">куплено</span>` : `<button class="btn" data-action="buy" data-arg="double" ${off ? "disabled" : ""}>Купити</button>`;
+    } else if (item.id === "respin") {
+      action = `<button class="btn" data-action="buy" data-arg="respin" ${off ? "disabled" : ""}>Купити</button>${me.tokens ? `<span class="muted small">у тебе: ${me.tokens}</span>` : ""}`;
+    } else if (item.id === "swap") {
+      const opts = hand.map((c) => `<option value="${esc(c.key)}" ${d.swapKey === c.key ? "selected" : ""}>${esc(c.title)}</option>`).join("");
+      action = `<select data-draft="swapKey"><option value="">— яку карту замінити —</option>${opts}</select>
+        <input data-draft="swapUrl" type="url" placeholder="Посилання на новий трек" value="${esc(d.swapUrl)}">
+        <button class="btn" data-action="buy" data-arg="swap" ${off || !hand.length ? "disabled" : ""}>Замінити</button>`;
+    } else if (item.id === "extraCard") {
+      action = `<input data-draft="extraUrl" type="url" placeholder="Посилання на новий трек" value="${esc(d.extraUrl)}">
+        <button class="btn" data-action="buy" data-arg="extraCard" ${off ? "disabled" : ""}>Додати</button>`;
+    }
+    return `<li class="shop-item ${poor ? "poor" : ""}">
+      <div class="shop-head"><span class="icon">${ITEM_ICON[item.id]}</span><b>${item.title}</b><span class="price">${plural(price, POINTS)}</span></div>
+      <p class="muted small">${item.text}</p><div class="shop-act">${action}</div></li>`;
+  }).join("");
+  const log = mine.map((r) => {
+    const item = SHOP_ITEMS.find((i) => i.id === r.item);
+    const st = r.status === "ok" ? `✓ −${plural(r.price ?? 0, POINTS)}` : r.status === "rejected" ? `✗ ${esc(r.reason)}` : "обробляється…";
+    return `<li><span>${esc(item?.title ?? r.item)}</span><span class="${r.status === "rejected" ? "error" : "muted"}">${st}</span></li>`;
+  }).join("");
+  return `<section class="panel">
+    <h2>Магазин <span class="muted">у тебе ${plural(score, POINTS)}</span></h2>
+    <p class="muted small">Бали — це і рахунок, і гроші. Ціна — відсоток від твоїх балів (мінімум 1). Купувати можна, поки ведучий не закрив магазин.</p>
+    ${S.error ? `<p class="error">${esc(S.error)}</p>` : ""}
+    <ul class="shop">${cards}</ul>
+    ${log ? `<h3>Твої покупки</h3><ul class="shop-mine">${log}</ul>` : ""}
+  </section>`;
+}
+
+function viewTbSubmit() {
+  if (!isTied()) {
+    return `<section class="panel center"><h2>Тай-брейк</h2><p class="muted">${esc(tiedNames())} обирають новий трек на тему. Скоро слухаємо!</p></section>`;
+  }
+  const sub = S.tbSub;
+  const status = sub?.rejected
+    ? `<p class="error">${esc(sub.rejected)}</p>`
+    : sub?.key ? `<p class="hint">✓ Твій трек: ${esc(sub.title)}. Можеш замінити, поки не вийшов час.</p>` : "";
+  return `<section class="panel">
+    <h2>Тай-брейк: твій новий трек</h2>
+    <p class="muted">Встав будь-який трек на тему, якого ще не було в цій грі. ${isClassic() ? "" : "Якщо принесеш те саме, що й суперник, — неоригінально!"}</p>
+    ${status}
+    ${S.error ? `<p class="error">${esc(S.error)}</p>` : ""}
+    <div class="add">
+      <input data-draft="tbUrl" type="url" placeholder="Посилання на трек" value="${esc(S.draft.tbUrl)}" ${S.busy ? "disabled" : ""}>
+      <button class="btn primary" data-action="submitTb" ${S.busy ? "disabled" : ""}>${S.busy ? "Перевіряю…" : sub?.key ? "Замінити" : "Надіслати"}</button>
+    </div>
+  </section>`;
+}
+
+function syncWheel() {
+  const g = S.game;
+  if (!g || g.phase !== PHASE.WHEEL || !g.wheel) { wheel.hide(); return; }
+  if (!g.wheel.id) {
+    wheel.idle(g.wheel.uids.map((uid) => S.players.find((p) => p.uid === uid)).filter(Boolean));
+    return;
+  }
+  const fresh = Date.now() - (g.wheel.at ?? 0) < g.wheel.ms + 1500;
+  wheel.spin(g.wheel, fresh, () => { landedWheel = g.wheel.id; render(); });
+}
+
 function syncReel() {
   const g = S.game;
   if (!g || g.phase !== PHASE.SPIN) { reel.hide(); return; }
   if (g.spin?.round !== g.round) { reel.idle(g.themesLeft ?? []); return; }
   // Сторінку відкрили вже після обертання — одразу показуємо результат.
   const fresh = Date.now() - (g.spin.at ?? 0) < g.spin.ms + 1500;
-  reel.spin(g.spin, fresh, () => { landedSpin = g.spin.id; render(); });
+  reel.spin(g.spin, fresh, () => {
+    landedSpin = g.spin.id;
+    landedSpinAt = fresh ? Date.now() : (g.spin.at ?? 0) + g.spin.ms;
+    render();
+    setTimeout(render, Math.max(0, landedSpinAt + RESPIN_WINDOW_MS - Date.now()) + 50); // сховати кнопку жетона
+  });
 }
 
 // ── Очікування входу: кільце прогресу навколо платівки ──────

@@ -9,7 +9,9 @@ export const PHASE = {
   LISTEN: "listen",     // ведучий програє треки
   VOTE: "vote",         // чат голосує
   RESULTS: "results",   // підсумки раунду, автори розкриті
-  TIEBREAK: "tiebreak", // нічия у фіналі
+  TIEBREAK: "tiebreak", // (застаріле) нічия у фіналі
+  TB_SUBMIT: "tbsubmit", // тай-брейк: учасники нічиєї вставляють новий трек
+  WHEEL: "wheel",       // повторна нічия: платівка з аватарками
   FINAL: "final",       // п'єдестал
 };
 
@@ -23,6 +25,8 @@ export const PHASE_LABEL = {
   vote: "Голосування",
   results: "Підсумки раунду",
   tiebreak: "Тай-брейк",
+  tbsubmit: "Тай-брейк: учасники обирають новий трек",
+  wheel: "Платівка вирішує",
   final: "Фінал",
 };
 

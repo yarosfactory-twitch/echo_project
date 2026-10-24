@@ -78,6 +78,34 @@ service cloud.firestore {
           allow delete: if isHost();
         }
 
+        // Магазин: заявка на покупку. Створює гравець за столом лише від свого імені;
+        // ціну, перевірку і результат (status) пише ведучий.
+        match /shop/{id} {
+          allow read: if isHost() || (signedIn() && resource.data.uid == request.auth.uid);
+          allow create: if isActivePlayer(g) && game(g).phase == 'shop' && string(game(g).round) == n
+            && request.resource.data.uid == request.auth.uid
+            && request.resource.data.keys().hasOnly(['uid', 'item', 'arg', 'card', 'at'])
+            && request.resource.data.item in ['queue', 'swap', 'extraCard', 'double', 'respin'];
+          allow update, delete: if isHost();
+        }
+
+        // Жетон повторного обертання: гравець просить перекрутити; ведучий перевіряє жетон і час.
+        match /respin/{uid} {
+          allow read: if isHost() || isSelf(uid);
+          allow create, update: if isSelf(uid) && isActivePlayer(g) && game(g).phase == 'spin'
+            && request.resource.data.keys().hasOnly(['spinId', 'at']);
+          allow delete: if isHost();
+        }
+
+        // Тай-брейк: новий трек учасника нічиєї. Ведучий може позначити його відхиленим.
+        match /tb/{uid} {
+          allow read: if isHost() || isSelf(uid);
+          allow create, update: if isHost() || (isSelf(uid) && game(g).phase == 'tbsubmit'
+            && request.auth.uid in game(g).tiebreak.tied
+            && request.resource.data.keys().hasOnly(['key', 'source', 'id', 'embed', 'url', 'title', 'author', 'start', 'at']));
+          allow delete: if isHost();
+        }
+
         // Голос гравця із сайту. Будь-який гравець гри (і вибулий) голосує лише за себе;
         // що він не голосує за свій трек, перевіряє ведучий (знає авторів).
         match /votes/{uid} {

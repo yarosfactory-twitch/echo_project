@@ -8,7 +8,7 @@ import { getFirestore } from "https://www.gstatic.com/firebasejs/10.12.2/firebas
 import { firebaseConfig } from "./config.js";
 
 export {
-  doc, collection, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot,
+  doc, collection, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot,
   query, where, orderBy, limit, serverTimestamp, writeBatch, deleteField,
   increment, arrayUnion,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";

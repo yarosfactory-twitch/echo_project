@@ -447,3 +447,50 @@ summary { cursor: pointer; color: var(--muted); }
   background: var(--ok); color: var(--ink);
 }
 .vote-badge.mine { background: rgba(0,0,0,.6); color: var(--cream); }
+
+/* ── Магазин ───────────────────────────── */
+.shop { list-style: none; padding: 0; margin: 12px 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.shop-item { background: rgba(0,0,0,.25); border: 1px solid rgba(212,169,74,.25); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 6px; }
+.shop-item.poor { opacity: .55; }
+.shop-head { display: flex; align-items: center; gap: 10px; }
+.shop-head .icon { width: 32px; height: 32px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: rgba(212,169,74,.15); color: var(--brass); font-weight: 800; }
+.shop-head b { flex: 1; }
+.shop-head .price { color: var(--brass); font-weight: 800; white-space: nowrap; }
+.shop-item p { margin: 0; }
+.shop-act { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: auto; }
+.shop-act select, .shop-act input { flex: 1 1 100%; width: 100%; min-width: 0; }
+select { font: 1rem var(--sans); color: var(--cream); background: rgba(0,0,0,.35); border: 1px solid rgba(212,169,74,.35); border-radius: 8px; padding: 9px 10px; }
+.shop-mine, .shop-log { list-style: none; padding: 0; margin: 8px auto; max-width: 640px; }
+.shop-mine li, .shop-log li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 12px; border-bottom: 1px solid rgba(212,169,74,.15); }
+.shop-log li { align-items: center; background: rgba(0,0,0,.2); border-radius: 8px; margin-bottom: 6px; border: 1px solid rgba(212,169,74,.15); }
+.shop-log .who { font-weight: 700; flex: 1; }
+.shop-log .pts { color: var(--brass); font-weight: 800; }
+.shop-log.tb li { gap: 14px; }
+.shop-log.tb li.ready { border-color: var(--ok); }
+.shop-log .avatar { width: 40px; height: 40px; border-radius: 50%; }
+.notice { text-align: center; margin: 0 auto 12px; max-width: 680px; padding: 10px 14px; border-radius: 10px; background: rgba(226,115,90,.15); border: 1px solid var(--danger); color: var(--cream); font-weight: 700; }
+
+/* ── Платівка з аватарками ─────────────── */
+.wheel { position: relative; z-index: 1; display: flex; justify-content: center; margin: 10px auto 20px; --size: 340px; }
+.wheel.big { --size: min(560px, 62vh); }
+.wheel[hidden] { display: none; }
+.wheel-wrap { position: relative; width: var(--size); height: var(--size); }
+.wheel-disc {
+  position: absolute; inset: 0; border-radius: 50%;
+  background:
+    radial-gradient(circle, #c0392b 0 15%, #111 15.5% 17%, transparent 17.5%),
+    repeating-radial-gradient(circle, #141414 0 2px, #222 2px 4px);
+  box-shadow: inset 0 0 0 6px #000, 0 18px 40px rgba(0,0,0,.6), 0 0 0 3px var(--brass-dim);
+}
+.wheel-disc::after { content: ""; position: absolute; left: 50%; top: 50%; width: 3%; height: 3%; transform: translate(-50%, -50%); border-radius: 50%; background: var(--cream); }
+.wheel-line { position: absolute; left: 50%; top: 0; width: 1px; height: 50%; background: rgba(212,169,74,.25); transform-origin: bottom center; transform: rotate(var(--a)); }
+.wheel-slot { position: absolute; left: 50%; top: 0; height: 50%; width: 0; transform-origin: bottom center; transform: rotate(var(--a)); }
+.wheel-face { position: absolute; top: 9%; left: 0; transform: translateX(-50%); width: calc(var(--size) * .17); height: calc(var(--size) * .17); border-radius: 50%; overflow: hidden; border: 3px solid var(--brass); background: var(--felt-2); display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: calc(var(--size) * .07); }
+.wheel-face img { width: 100%; height: 100%; object-fit: cover; }
+.wheel-name { position: absolute; top: calc(9% + var(--size) * .185); left: 0; transform: translateX(-50%); white-space: nowrap; font-weight: 700; font-size: calc(var(--size) * .04); text-shadow: 0 1px 3px #000; }
+.wheel-slot.win .wheel-face { border-color: var(--ok); box-shadow: 0 0 24px rgba(127,209,160,.8); }
+/* Голка (тонарм) зверху */
+.wheel-needle { position: absolute; left: 50%; top: -18px; z-index: 3; width: 0; height: 0; transform: translateX(-50%);
+  border-left: 14px solid transparent; border-right: 14px solid transparent; border-top: 34px solid var(--brass); filter: drop-shadow(0 3px 4px rgba(0,0,0,.6)); }
+.wheel.landed .wheel-needle { animation: band-glow 1.2s ease-out; }
+.wheel + * , #wheel:not([hidden]) { margin-top: 26px; }

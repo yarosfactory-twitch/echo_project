@@ -15,13 +15,15 @@ import { VoteCollector } from "./votes.js";
 import { findDuplicateGroups, burnPlan, burnedKeys } from "./originality.js";
 import { connectChat } from "./chat.js";
 import { Reel, SPIN_MS } from "./reel.js";
+import { VinylWheel, WHEEL_MS } from "./wheel.js";
+import { itemById, priceOf, applyQueue, roundPoints, tiebreakOriginality, tiebreakWinners, RESPIN_WINDOW_MS, SHOP_ITEMS } from "./shop.js";
 import {
-  PHASE, PHASE_LABEL, MODE_LABEL, deckSize, freshThemes, roundsLeft, lateJoinOpen, lateJoinScore, shuffle, pickRandom, standings, leadersTie, DEFAULT_THEMES,
+  PHASE, PHASE_LABEL, MODE_LABEL, deckSize, freshThemes, roundsLeft, lateJoinOpen, lateJoinScore, cryptoRandom, shuffle, pickRandom, standings, leadersTie, DEFAULT_THEMES,
 } from "./game-logic.js";
 import { $, esc, patch, fmtCountdown, sourceLabel, standingsHTML, originalityHTML, tableHTML, flipClass, plural, CARDS, POINTS } from "./ui.js";
 
 const els = {
-  auth: $("#auth"), control: $("#control"), stage: $("#stage"), reel: $("#reel"), top: $("#top-stage"),
+  auth: $("#auth"), control: $("#control"), stage: $("#stage"), reel: $("#reel"), top: $("#top-stage"), wheel: $("#wheel"),
   player: $("#player"), seats: $("#seats"), log: $("#log"),
 };
 
@@ -29,6 +31,7 @@ const S = {
   user: null, gameId: undefined, game: null, players: [], requests: [],
   round: null, moves: [], secret: null, themesPool: null,
   collector: null, chat: "off", logLines: [], siteVotes: [],
+  tbSubs: [], shopReqs: [], respins: [],
   // Чернетка форми «Нова гра». Тримаємо значення тут, бо перемальовування
   // панелі (patch) інакше скидає поля до значень за замовчуванням.
   form: {
@@ -46,6 +49,9 @@ let currentSc = null; // віджет SoundCloud поточного треку
 let appliedSiteVotes = new Map(); // голоси гравців із сайту, уже враховані: uid → підпис
 let votesDirty = false; // є незбережені голоси
 const reel = new Reel(els.reel, { sound: true }); // звук обертання йде лише зі сторінки ведучого
+const wheel = new VinylWheel(els.wheel, { sound: true });
+let landedWheel = null;  // id обертання платівки, яке вже зупинилось
+let landedSpinAt = 0;    // коли (час ведучого) зупинився барабан — для вікна жетона
 let landedSpin = null; // id обертання, яке вже зупинилось (до цього тему не показуємо)
 let gameSubs = [];
 let roundSubs = [];
@@ -114,7 +120,7 @@ function syncRound() {
   if (key === roundKey) return;
   roundSubs.forEach((off) => off());
   roundSubs = []; roundKey = key; S.round = null; S.moves = []; S.secret = null; S.collector = null;
-  S.siteVotes = []; appliedSiteVotes = new Map();
+  S.siteVotes = []; appliedSiteVotes = new Map(); S.tbSubs = []; S.shopReqs = []; S.respins = [];
   if (!n) return;
   roundSubs.push(
     onSnapshot(gref("rounds", String(n)), (s) => { S.round = s.data() ?? null; updatePlayer(); render(); }),
@@ -127,6 +133,23 @@ function syncRound() {
     onSnapshot(gcol("rounds", String(n), "votes"), (s) => {
       S.siteVotes = s.docs.map((d) => ({ uid: d.id, ...d.data() }));
       applySiteVotes();
+    }),
+    // Тай-брейк: нові треки учасників нічиєї.
+    onSnapshot(gcol("rounds", String(n), "tb"), (s) => {
+      S.tbSubs = s.docs.map((d) => ({ uid: d.id, ...d.data() }));
+      onTbSubsChanged();
+      render();
+    }),
+    // Магазин: заявки на покупку, ведучий обробляє по черзі.
+    onSnapshot(gcol("rounds", String(n), "shop"), (s) => {
+      S.shopReqs = s.docs.map((d) => ({ id: d.id, ...d.data() }));
+      processShop();
+      render();
+    }),
+    // Жетони повторного обертання.
+    onSnapshot(gcol("rounds", String(n), "respin"), (s) => {
+      S.respins = s.docs.map((d) => ({ uid: d.id, ...d.data() }));
+      processRespins();
     }),
   );
 }
@@ -398,28 +421,46 @@ const A = {
   // TODO: жетон «Повторне обертання» (10 секунд після зупинки) — новий spin з тим самим раундом.
   spin: () => once("spin", async () => {
     if (spunThisRound()) return;
-    const left = S.game.themesLeft ?? [];
-    if (!left.length) { log("⚠ Теми закінчились, додай нові в пул"); return; }
-    const theme = pickRandom(left);
-    const list = shuffle(left);
-    const n = S.game.round;
-    await updateDoc(gref(), {
-      theme, themesLeft: left.filter((t) => t !== theme),
-      spin: { id: `${n}-${Date.now()}`, round: n, list, target: list.indexOf(theme), ms: SPIN_MS, at: Date.now() },
-      nowPlaying: null, revealed: [],
-    });
+    await doSpin(S.game.themesLeft ?? []);
   }),
 
   startRound: () => once("startRound", async () => {
     if (!spunThisRound() || landedSpin !== S.game.spin.id) return;
     const n = S.game.round;
     const batch = writeBatch(db);
-    await activateLateJoiners(batch);
     batch.set(gref("rounds", String(n)), { theme: S.game.theme, plays: [], thrown: [], revealed: false });
-    batch.update(gref(), {
-      phase: PHASE.DISCARD, phaseEndsAt: Date.now() + S.game.settings.discardSeconds * 1000,
-    });
+    if (S.game.tiebreak) {
+      // Тай-брейк: учасники нічиєї мають 3 хв на будь-який новий трек.
+      batch.update(gref(), { phase: PHASE.TB_SUBMIT, phaseEndsAt: Date.now() + (S.game.settings.tiebreakSeconds ?? 180) * 1000 });
+    } else {
+      await activateLateJoiners(batch);
+      batch.update(gref(), { phase: PHASE.DISCARD, phaseEndsAt: Date.now() + S.game.settings.discardSeconds * 1000 });
+    }
     await batch.commit();
+  }),
+
+  closeTbSubmit: () => once("closeTbSubmit", closeTbSubmit),
+
+  spinWheel: () => once("spinWheel", async () => {
+    const w = S.game.wheel;
+    if (!w || w.id) return;
+    const players = w.uids.map((uid) => S.players.find((p) => p.uid === uid)).filter(Boolean)
+      .map((p) => ({ uid: p.uid, displayName: p.displayName, avatar: p.avatar ?? null }));
+    const target = Math.floor(cryptoRandom() * players.length);
+    const jitter = (cryptoRandom() - 0.5) * 0.7;
+    await updateDoc(gref(), { wheel: { ...w, id: `w-${Date.now()}`, players, target, jitter, ms: WHEEL_MS, at: Date.now() } });
+  }),
+
+  wheelToFinal: () => once("wheelToFinal", async () => {
+    const w = S.game.wheel;
+    if (!w?.id || landedWheel !== w.id) return;
+    const winner = w.players[w.target];
+    log(`Платівка обрала переможця: ${winner.displayName}`);
+    await finalize(winner.uid);
+  }),
+
+  closeShop: () => once("closeShop", async () => {
+    await updateDoc(gref(), { phase: PHASE.SPIN });
   }),
 
   closeDiscard: () => once("closeDiscard", closeDiscard),
@@ -439,20 +480,19 @@ const A = {
   closeVote: () => once("closeVote", closeVote),
 
   nextRound: () => once("nextRound", async () => {
+    if (S.game.tiebreak) return resolveTiebreak();
     if (S.game.round >= S.game.settings.rounds) return finish();
-    // TODO: магазин. Поки фаза SHOP — лише пауза перед колесом.
-    await updateDoc(gref(), { round: S.game.round + 1, phase: PHASE.SHOP, theme: null, nowPlaying: null, revealed: [], phaseEndsAt: null });
+    // Між раундами — магазин (з 2-го раунду).
+    await updateDoc(gref(), {
+      round: S.game.round + 1, phase: PHASE.SHOP, theme: null, nowPlaying: null, revealed: [], phaseEndsAt: null,
+      mods: { round: S.game.round + 1, queue: [], double: [] },
+    });
   }),
 
   toSpin: () => once("toSpin", async () => { await updateDoc(gref(), { phase: PHASE.SPIN }); }),
 
-  // TODO: справжній тай-брейк (тема заздалегідь, 3 хв на новий трек). Поки одразу колесо з ніками.
-  randomWinner: () => once("randomWinner", async () => {
-    const tied = activePlayers().filter((p) => (S.game.tied ?? []).includes(p.uid));
-    const winner = pickRandom(tied);
-    log(`Випадковий переможець: ${winner.displayName}`);
-    await finalize(winner.uid);
-  }),
+  // Старі ігри з фазою TIEBREAK (до цього оновлення): переводимо на новий тай-брейк.
+  randomWinner: () => once("randomWinner", async () => startTiebreak(S.game.tied ?? [], 1)),
 };
 
 /** Гравець натиснув «Вийти» в лобі (status → out): прибираємо його місце й колоду. */
@@ -481,7 +521,32 @@ function syncReel() {
   if (!g || g.phase !== PHASE.SPIN) { reel.hide(); return; }
   if (!spunThisRound()) { reel.idle(g.themesLeft ?? []); return; }
   const fresh = Date.now() - (g.spin.at ?? 0) < g.spin.ms + 1500;
-  reel.spin(g.spin, fresh, () => { landedSpin = g.spin.id; render(); });
+  reel.spin(g.spin, fresh, () => {
+    landedSpin = g.spin.id;
+    landedSpinAt = fresh ? Date.now() : (g.spin.at ?? 0) + g.spin.ms;
+    render();
+    // Вікно жетона закривається — перемалюємо кнопку «Почати раунд».
+    setTimeout(render, Math.max(0, landedSpinAt + RESPIN_WINDOW_MS - Date.now()) + 50);
+  });
+}
+
+/** Платівка з аватарками (повторна нічия в тай-брейку). */
+function syncWheel() {
+  const g = S.game;
+  if (!g || g.phase !== PHASE.WHEEL || !g.wheel) { wheel.hide(); return; }
+  if (!g.wheel.id) {
+    const players = g.wheel.uids.map((uid) => S.players.find((p) => p.uid === uid)).filter(Boolean);
+    wheel.idle(players);
+    return;
+  }
+  const fresh = Date.now() - (g.wheel.at ?? 0) < g.wheel.ms + 1500;
+  wheel.spin(g.wheel, fresh, () => { landedWheel = g.wheel.id; render(); });
+}
+
+/** Чи хтось за столом має жетон і вікно після зупинки ще відкрите. */
+function respinWindowOpen() {
+  const holders = activePlayers().some((p) => (p.tokens ?? 0) > 0);
+  return holders && landedSpin === S.game?.spin?.id && Date.now() - landedSpinAt < RESPIN_WINDOW_MS;
 }
 
 function canStart() {
@@ -530,8 +595,9 @@ async function closeDiscard() {
     if (move.type === "discard") plays.push({ p, card });
   }
 
-  // TODO: плюшка «Черга» (перший/останній) змінює порядок після перемішування.
-  const ordered = shuffle(plays).map((x, i) => ({ ...x, slot: i + 1 }));
+  // «Черга» з магазину: куплені «першим»/«останнім» стають на початок/у кінець.
+  const queue = S.game.mods?.round === n ? S.game.mods.queue ?? [] : [];
+  const ordered = applyQueue(shuffle(plays), queue).map((x, i) => ({ ...x, slot: i + 1 }));
   batch.set(gref("rounds", String(n)), {
     plays: ordered.map(({ slot, card }) => ({ slot, source: card.source, id: card.id, embed: card.embed ?? null, url: card.url, title: card.title, start: card.start ?? 0 })),
     revealed: false,
@@ -587,9 +653,10 @@ async function closeVote() {
   S.collector.open = false;
   const counts = S.collector.tally();
   const batch = writeBatch(db);
-  // TODO: «Подвійний раунд» множить votes на 2 для власника жетона.
+  // «Подвійний раунд» з магазину множить бали за цей раунд на 2.
+  const doubled = new Set(S.game.mods?.round === S.game.round ? S.game.mods.double ?? [] : []);
   for (const s of S.secret.slots) {
-    batch.update(gref("players", s.uid), { score: increment(counts[s.slot] ?? 0) });
+    batch.update(gref("players", s.uid), { score: increment(roundPoints(counts[s.slot], doubled.has(s.uid))) });
   }
   const plays = (S.round?.plays ?? []).map((p) => {
     const s = S.secret.slots.find((x) => x.slot === p.slot);
@@ -603,12 +670,224 @@ async function closeVote() {
 
 async function finish() {
   const tied = leadersTie(S.players);
-  if (tied.length > 1) {
-    await updateDoc(gref(), { phase: PHASE.TIEBREAK, tied: tied.map((p) => p.uid), phaseEndsAt: null });
-    log(`Нічия: ${tied.map((p) => p.displayName).join(", ")}`);
-    return;
-  }
+  if (tied.length > 1) return startTiebreak(tied.map((p) => p.uid), 1);
   await finalize(tied[0]?.uid ?? null);
+}
+
+/** Вибір теми барабаном. Якщо теми закінчились (тай-брейк), беремо весь пул. */
+async function doSpin(left, extra = {}) {
+  const pool = left.length ? left : (S.themesPool ?? DEFAULT_THEMES);
+  if (!pool.length) { log("⚠ Теми закінчились, додай нові в пул"); return; }
+  const theme = pickRandom(pool);
+  const list = shuffle(pool);
+  const n = S.game.round;
+  await updateDoc(gref(), {
+    theme, themesLeft: pool.filter((t) => t !== theme),
+    spin: { id: `${n}-${Date.now()}`, round: n, list, target: list.indexOf(theme), ms: SPIN_MS, at: Date.now() },
+    nowPlaying: null, revealed: [], ...extra,
+  });
+}
+
+// ── Тай-брейк ───────────────────────────────────────────────
+/** Новий раунд тай-брейку для гравців tied: барабан тем → 3 хв на новий трек → голосування. */
+async function startTiebreak(tied, k, notice = null) {
+  const names = tied.map((uid) => S.players.find((p) => p.uid === uid)?.displayName ?? "?");
+  log(`Тай-брейк ${k}: ${names.join(", ")}`);
+  await updateDoc(gref(), {
+    tiebreak: { tied, k }, tbNotice: notice,
+    round: S.game.settings.rounds + k, phase: PHASE.SPIN, theme: null,
+    nowPlaying: null, revealed: [], phaseEndsAt: null, wheel: null,
+  });
+}
+
+/** Усі треки гри (у колодах, зіграні, згорілі) — у тай-брейку потрібен новий трек. */
+async function allGameKeys() {
+  const keys = new Set(S.game.burned ?? []);
+  for (const p of S.players) {
+    for (const c of (await getDoc(gref("decks", p.uid))).data()?.cards ?? []) keys.add(c.key);
+  }
+  return keys;
+}
+
+let tbKeysCache = null; // ключі треків гри на час збору треків тай-брейку
+/** Класичний режим: трек, що вже є в грі або в іншого учасника, одразу відхиляємо. */
+async function onTbSubsChanged() {
+  const g = S.game;
+  if (g?.phase !== PHASE.TB_SUBMIT) return;
+  tbKeysCache ??= await allGameKeys();
+  for (const sub of S.tbSubs) {
+    if (sub.rejected || !sub.key) continue;
+    const takenByOther = S.tbSubs.some((o) => o.uid !== sub.uid && o.key === sub.key && !o.rejected && (o.at?.seconds ?? 0) <= (sub.at?.seconds ?? 0));
+    let reason = null;
+    if (tbKeysCache.has(sub.key)) reason = "Цей трек уже був у цій грі — потрібен новий";
+    else if (g.settings.mode !== "hardcore" && takenByOther) reason = "Цей трек уже взяв інший учасник, обери інший";
+    if (reason) await updateDoc(gref("rounds", String(g.round), "tb", sub.uid), { rejected: reason }).catch(() => {});
+  }
+  // Усі учасники вставили прийнятий трек — закриваємо достроково.
+  const ok = S.tbSubs.filter((x) => x.key && !x.rejected);
+  if (g.tiebreak && g.tiebreak.tied.every((uid) => ok.some((x) => x.uid === uid))) A.closeTbSubmit();
+}
+
+async function closeTbSubmit() {
+  const g = S.game;
+  if (g.phase !== PHASE.TB_SUBMIT) return;
+  tbKeysCache = null;
+  const n = g.round;
+  const subs = (await getDocs(gcol("rounds", String(n), "tb"))).docs.map((d) => ({ uid: d.id, ...d.data() }))
+    .filter((x) => x.key && !x.rejected && g.tiebreak.tied.includes(x.uid));
+  const byUid = (uid) => S.players.find((p) => p.uid === uid);
+  const missing = g.tiebreak.tied.filter((uid) => !subs.some((x) => x.uid === uid));
+  missing.forEach((uid) => log(`${byUid(uid)?.displayName} не встиг вставити трек і вибуває з тай-брейку`));
+
+  if (!subs.length) {
+    // Ніхто не вставив трек — вирішує платівка серед усіх учасників нічиєї.
+    return updateDoc(gref(), { phase: PHASE.WHEEL, phaseEndsAt: null, wheel: { uids: g.tiebreak.tied } });
+  }
+  let { originals, unoriginal } = g.settings.mode === "hardcore"
+    ? tiebreakOriginality(subs)
+    : { originals: subs.map((x) => x.uid), unoriginal: [] };
+  const burned = [...new Set([...(g.burned ?? []), ...subs.filter((x) => unoriginal.includes(x.uid)).map((x) => x.key)])];
+  const unNames = unoriginal.map((uid) => byUid(uid)?.displayName).join(", ");
+  if (unoriginal.length) log(`🔥 Неоригінально в тай-брейку: ${unNames}`);
+
+  if (originals.length === 1) {
+    await updateDoc(gref(), { burned, tbNotice: unoriginal.length ? { text: `Неоригінально: ${unNames}` } : null });
+    log(`Оригінальним лишився лише ${byUid(originals[0])?.displayName} — перемога`);
+    return finalize(originals[0]);
+  }
+  if (originals.length === 0) {
+    // Усі принесли однакові треки — новий тай-брейк з новою темою.
+    await updateDoc(gref(), { burned });
+    return startTiebreak(unoriginal, g.tiebreak.k + 1, { text: `Неоригінально: ${unNames}. Ще один раунд з новою темою!` });
+  }
+  // 2+ оригінальних — звичайне прослуховування і голосування між ними.
+  const plays = shuffle(subs.filter((x) => originals.includes(x.uid))).map((x, i) => ({ ...x, slot: i + 1 }));
+  const batch = writeBatch(db);
+  batch.set(gref("rounds", String(n)), {
+    theme: g.theme, thrown: [], revealed: false,
+    plays: plays.map((x) => ({ slot: x.slot, source: x.source, id: x.id ?? null, embed: x.embed ?? null, url: x.url, title: x.title, start: x.start ?? 0 })),
+  }, { merge: true });
+  batch.set(gref("secret", `round_${n}`), {
+    slots: plays.map((x) => ({ slot: x.slot, uid: x.uid, login: byUid(x.uid)?.login ?? "", displayName: byUid(x.uid)?.displayName ?? "?" })),
+  });
+  batch.update(gref(), {
+    burned, phase: PHASE.LISTEN, phaseEndsAt: null, nowPlaying: null, revealed: [],
+    tbNotice: unoriginal.length ? { text: `Неоригінально: ${unNames} — вибувають з тай-брейку` } : null,
+  });
+  await batch.commit();
+}
+
+/** Після голосування тай-брейку: один лідер — переможець, кілька — платівка. */
+async function resolveTiebreak() {
+  const g = S.game;
+  const plays = S.round?.plays ?? [];
+  const votes = Object.fromEntries(plays.filter((p) => p.uid).map((p) => [p.uid, p.votes ?? 0]));
+  const winners = tiebreakWinners(votes);
+  if (winners.length === 1) return finalize(winners[0]);
+  const uids = winners.length ? winners : g.tiebreak.tied;
+  log(`Знову нічия — вирішує платівка: ${uids.map((u) => S.players.find((p) => p.uid === u)?.displayName).join(", ")}`);
+  await updateDoc(gref(), { phase: PHASE.WHEEL, phaseEndsAt: null, wheel: { uids } });
+}
+
+// ── Магазин ─────────────────────────────────────────────────
+const shopDone = new Set(); // id заявок, які вже обробляємо (захист від подвійної обробки)
+let boughtCache = null;     // { round, queue:Set, double:Set } — що вже куплено в раунді
+
+function boughtThisRound(n) {
+  if (boughtCache?.round !== n) {
+    const m = S.game.mods?.round === n ? S.game.mods : {};
+    boughtCache = { round: n, queue: new Set((m.queue ?? []).map((q) => q.uid)), double: new Set(m.double ?? []) };
+  }
+  return boughtCache;
+}
+
+/** Обробляє заявки по черзі за часом. Ціну рахуємо тут, з актуальних балів. */
+async function processShop() {
+  const g = S.game;
+  if (!g || g.phase !== PHASE.SHOP) return;
+  const pending = S.shopReqs.filter((r) => !r.status && !shopDone.has(r.id))
+    .sort((a, b) => (a.at?.seconds ?? 0) - (b.at?.seconds ?? 0) || (a.at?.nanoseconds ?? 0) - (b.at?.nanoseconds ?? 0));
+  for (const req of pending) {
+    shopDone.add(req.id);
+    try { await handlePurchase(req); } catch (e) { log(`⚠ магазин: ${e.message}`); }
+  }
+}
+
+async function handlePurchase(req) {
+  const g = S.game;
+  const n = g.round;
+  const reqRef = gref("rounds", String(n), "shop", req.id);
+  const p = S.players.find((x) => x.uid === req.uid);
+  const item = itemById(req.item);
+  const reject = (reason) => updateDoc(reqRef, { status: "rejected", reason });
+  if (!p || p.status !== "active") return reject("Купувати можуть лише гравці за столом");
+  if (!item) return reject("Невідома плюшка");
+  // Актуальний рахунок: з бази, бо кілька покупок поспіль змінюють бали.
+  const fresh = (await getDoc(gref("players", p.uid))).data() ?? p;
+  const price = priceOf(fresh.score ?? 0, g.settings.prices?.[item.pct] ?? 0);
+  if ((fresh.score ?? 0) < price) return reject(`Не вистачає балів: потрібно ${price}`);
+
+  // Покупки обробляються одна за одною швидше, ніж приходить знімок гри, тож
+  // дописуємо в масиви через arrayUnion, а не переписуємо весь mods.
+  const bought = boughtThisRound(n);
+  const batch = writeBatch(db);
+  const deckRef = gref("decks", p.uid);
+  if (item.id === "queue") {
+    if (bought.queue.has(p.uid)) return reject("Черга вже куплена в цьому раунді");
+    bought.queue.add(p.uid);
+    batch.update(gref(), { "mods.round": n, "mods.queue": arrayUnion({ uid: p.uid, pos: req.arg === "last" ? "last" : "first", at: Date.now() }) });
+  } else if (item.id === "double") {
+    if (bought.double.has(p.uid)) return reject("Подвійний раунд уже куплено");
+    bought.double.add(p.uid);
+    batch.update(gref(), { "mods.round": n, "mods.double": arrayUnion(p.uid) });
+  } else if (item.id === "respin") {
+    batch.update(gref("players", p.uid), { tokens: increment(1) });
+  } else if (item.id === "swap" || item.id === "extraCard") {
+    const card = req.card;
+    if (!card?.key) return reject("Немає треку");
+    // Трек, що збігається з будь-якою картою гри, купити не можна.
+    const keys = await allGameKeys();
+    if (keys.has(card.key)) return reject("Цей трек уже є в грі — обери інший");
+    const cards = (await getDoc(deckRef)).data()?.cards ?? [];
+    const clean = { key: card.key, source: card.source, id: card.id ?? null, embed: card.embed ?? null, url: card.url, title: card.title, author: card.author ?? "", start: card.start ?? 0, used: false };
+    if (item.id === "swap") {
+      const i = cards.findIndex((c) => c.key === req.arg && !c.used);
+      if (i < 0) return reject("Цієї карти вже немає в руці");
+      cards[i] = clean;
+    } else {
+      cards.push(clean);
+    }
+    batch.set(deckRef, { cards });
+    batch.update(gref("players", p.uid), { cardCount: cards.filter((c) => !c.used).length });
+    if (g.settings.mode !== "hardcore") batch.set(gref("tracks", card.key), { uid: p.uid });
+  }
+  batch.update(gref("players", p.uid), { score: increment(-price) });
+  batch.update(reqRef, { status: "ok", price });
+  await batch.commit();
+  log(`🛒 ${p.displayName}: ${item.title} за ${plural(price, POINTS)}`);
+}
+
+// ── Жетон повторного обертання ──────────────────────────────
+const respinUsed = new Set(); // `${spinId}|${uid}`
+
+async function processRespins() {
+  const g = S.game;
+  if (!g || g.phase !== PHASE.SPIN || !g.spin || landedSpin !== g.spin.id) return;
+  if (Date.now() - landedSpinAt > RESPIN_WINDOW_MS + 1500) return;
+  for (const r of S.respins) {
+    if (r.spinId !== g.spin.id) continue;
+    const key = `${r.spinId}|${r.uid}`;
+    if (respinUsed.has(key)) continue;
+    respinUsed.add(key);
+    const p = S.players.find((x) => x.uid === r.uid);
+    const fresh = (await getDoc(gref("players", r.uid))).data();
+    if (!p || p.status !== "active" || !(fresh?.tokens > 0)) continue;
+    log(`🔄 ${p.displayName} використовує жетон — перекручуємо барабан`);
+    await updateDoc(gref("players", r.uid), { tokens: increment(-1) });
+    // Стара тема повертається в барабан.
+    await doSpin([...(g.themesLeft ?? []), g.theme], { respinBy: p.displayName });
+    return; // одне перекручування за раз
+  }
 }
 
 let finalizing = false;
@@ -646,6 +925,7 @@ setInterval(() => {
   if (!ends || Date.now() < ends) return;
   if (S.game.phase === PHASE.DISCARD) A.closeDiscard();
   if (S.game.phase === PHASE.VOTE) A.closeVote();
+  if (S.game.phase === PHASE.TB_SUBMIT) A.closeTbSubmit();
 }, 250);
 
 const lines = (text) => text.split("\n").map((t) => t.trim()).filter(Boolean);
@@ -765,8 +1045,9 @@ async function setupSoundCloud(iframe, startSec) {
 // ── Рендер ──────────────────────────────────────────────────
 function render() {
   patch(els.auth, viewAuth());
-  if (!isHost()) { ["control", "stage", "seats", "log"].forEach((k) => patch(els[k], "")); reel.hide(); return; }
+  if (!isHost()) { ["control", "stage", "seats", "log"].forEach((k) => patch(els[k], "")); reel.hide(); wheel.hide(); return; }
   syncReel();
+  syncWheel();
   patch(els.control, viewControl());
   patch(els.stage, viewStage());
   patch(els.top, viewTop());
@@ -841,17 +1122,38 @@ function viewControl() {
         ${b("applyOriginality", pending ? `Ще ${pending} на рішення` : "Спалити і почати гру", { primary: true, disabled: pending > 0 })}`;
       break;
     }
-    case PHASE.SHOP:
-      body = `<p class="muted">Магазин ще в розробці.</p>${b("toSpin", "До колеса", { primary: true })}`;
+    case PHASE.SHOP: {
+      const done = S.shopReqs.filter((r) => r.status === "ok").length;
+      body = `<p class="muted">Гравці купують плюшки. Покупок: ${done}. Коли всі готові — до барабана.</p>${b("closeShop", "Закрити магазин і до барабана", { primary: true })}`;
       break;
+    }
     case PHASE.SPIN: {
       const spun = spunThisRound();
       const landed = spun && landedSpin === g.spin.id;
-      body = !spun
-        ? `<p class="muted">Тем у барабані: ${(g.themesLeft ?? []).length}</p>${b("spin", "Крутити барабан", { primary: true, disabled: !(g.themesLeft ?? []).length })}`
-        : landed
-          ? `<p class="muted">Тема обрана. Прокоментуй і запускай раунд.</p>${b("startRound", "Почати раунд", { primary: true })}`
-          : `<p class="muted">Барабан крутиться…</p>${b("startRound", "Почати раунд", { disabled: true })}`;
+      const wait = landed && respinWindowOpen();
+      const left = (g.themesLeft ?? []).length || (g.tiebreak ? (S.themesPool ?? DEFAULT_THEMES).length : 0);
+      const tb = g.tiebreak ? `<p class="hint">Тай-брейк: ${esc(tiedNames())}. Після теми в них буде ${Math.round((g.settings.tiebreakSeconds ?? 180) / 60)} хв на новий трек.</p>` : "";
+      body = tb + (!spun
+        ? `<p class="muted">Тем у барабані: ${left}</p>${b("spin", "Крутити барабан", { primary: true, disabled: !left })}`
+        : !landed
+          ? `<p class="muted">Барабан крутиться…</p>${b("startRound", "Почати раунд", { disabled: true })}`
+          : wait
+            ? `<p class="muted">У гравців є жетони повторного обертання: 10 секунд на рішення…</p>${b("startRound", "Почати раунд", { disabled: true })}`
+            : `<p class="muted">Тема обрана. Прокоментуй і запускай ${g.tiebreak ? "тай-брейк" : "раунд"}.</p>${b("startRound", g.tiebreak ? "Почати тай-брейк" : "Почати раунд", { primary: true })}`);
+      break;
+    }
+    case PHASE.TB_SUBMIT: {
+      const ok = S.tbSubs.filter((x) => x.key && !x.rejected).length;
+      body = `<p class="muted">Учасники вставили трек: ${ok} / ${g.tiebreak?.tied.length ?? 0}</p>${b("closeTbSubmit", "Завершити зараз")}`;
+      break;
+    }
+    case PHASE.WHEEL: {
+      const w = g.wheel;
+      body = !w?.id
+        ? `<p class="muted">Знову нічия. Переможця обере платівка.</p>${b("spinWheel", "Крутити платівку", { primary: true })}`
+        : landedWheel === w.id
+          ? `<p class="muted">Голка обрала: <b>${esc(w.players[w.target]?.displayName)}</b>.</p>${b("wheelToFinal", "До фіналу", { primary: true })}`
+          : `<p class="muted">Платівка крутиться…</p>`;
       break;
     }
     case PHASE.DISCARD:
@@ -869,13 +1171,13 @@ function viewControl() {
       body = b("nextRound", g.round >= g.settings.rounds ? "До фіналу" : "Наступний раунд", { primary: true });
       break;
     case PHASE.TIEBREAK:
-      body = `<p class="muted">Тай-брейк ще в розробці. Поки переможця обирає випадок.</p>${b("randomWinner", "Випадковий переможець", { primary: true })}`;
+      body = `<p class="muted">Нічия (гра почалась до оновлення).</p>${b("randomWinner", "Почати тай-брейк", { primary: true })}`;
       break;
     case PHASE.FINAL:
       body = "";
       break;
   }
-  return `<section class="panel"><h2>${esc(PHASE_LABEL[g.phase])}${g.round ? ` · раунд ${g.round}/${g.settings.rounds}` : ""}</h2>
+  return `<section class="panel"><h2>${esc(PHASE_LABEL[g.phase])}${g.tiebreak ? " · тай-брейк" : g.round ? ` · раунд ${g.round}/${g.settings.rounds}` : ""}</h2>
     ${body}<div class="row end">${b("closeGame", g.phase === PHASE.FINAL ? "Закрити гру" : "Скасувати гру")}</div></section>`;
 }
 
@@ -884,6 +1186,10 @@ function viewStage() {
   const g = S.game;
   if (g.phase === PHASE.FINAL) return `<div class="stage-final"><h1 class="final-title">Фінал</h1>${standingsHTML(g.final)}</div>`;
   if (g.phase === PHASE.ORIGINALITY) return originalityHTML(g.originality?.groups);
+  if (g.phase === PHASE.SHOP) return shopStageHTML();
+  if (g.phase === PHASE.TB_SUBMIT) return tbStageHTML();
+  if (g.phase === PHASE.WHEEL) return `<h1 class="final-title">Знову нічия!</h1><p class="hint">Голка обере переможця</p>`;
+  if (g.phase === PHASE.SPIN && g.tiebreak) return `${noticeHTML()}<h1 class="final-title">Нічия! Тай-брейк</h1><p class="hint">${esc(tiedNames())}</p>`;
   // Поки гравці обирають карти — показуємо стіл, як у гравців.
   if (g.phase === PHASE.DISCARD) {
     return `<div class="stage-table">${tableHTML({ players: S.players, phase: g.phase, thrown: new Set(S.moves.map((m) => m.uid)) })}</div>`;
@@ -900,9 +1206,10 @@ function viewStage() {
     return `<li class="sleeve ${open ? "face" : "back"}${flip}${g.nowPlaying === p.slot ? " playing" : ""}${clickable ? " clickable" : ""}"${click}><span class="num">${p.slot}</span>
       ${open ? `<span class="src">${sourceLabel(p.source)}</span><span class="title">${esc(p.title)}</span>` : ""}${author}</li>`;
   }).join("");
+  const notice = g.tiebreak ? noticeHTML() : "";
   const voteInfo = g.phase === PHASE.VOTE
     ? `<p class="hint">Пиши в чат номер треку або голосуй на сайті · голосів: ${S.collector?.voterCount ?? 0}</p>` : "";
-  return `${voteInfo}${plays.length ? `<ul class="deck plays compact">${cards}</ul>` : ""}`;
+  return `${notice}${voteInfo}${plays.length ? `<ul class="deck plays compact">${cards}</ul>` : ""}`;
 }
 
 /** Фаза, тема й таймер у верхній смузі — так сцені лишається більше місця під відео. */
@@ -910,9 +1217,38 @@ function viewTop() {
   const g = S.game;
   if (!isHost() || !g || g.phase === PHASE.FINAL) return "";
   const showTheme = g.theme && (g.phase !== PHASE.SPIN || landedSpin === g.spin?.id);
-  const round = g.round ? ` · раунд ${g.round}/${g.settings.rounds}` : "";
+  const round = g.tiebreak ? ` · тай-брейк${g.tiebreak.k > 1 ? ` ${g.tiebreak.k}` : ""}` : g.round ? ` · раунд ${g.round}/${g.settings.rounds}` : "";
   return `<div class="phase">${esc(PHASE_LABEL[g.phase])}${round}</div>
     ${showTheme ? `<div class="theme">${esc(g.theme)}</div>` : ""}`;
+}
+
+const tiedNames = () => (S.game?.tiebreak?.tied ?? []).map((uid) => S.players.find((p) => p.uid === uid)?.displayName ?? "?").join(" · ");
+
+const noticeHTML = () => (S.game?.tbNotice?.text ? `<div class="notice">🔥 ${esc(S.game.tbNotice.text)}</div>` : "");
+
+/** Сцена магазину: хто що купив (без деталей треків). */
+function shopStageHTML() {
+  const ok = S.shopReqs.filter((r) => r.status === "ok").sort((a, b) => (a.at?.seconds ?? 0) - (b.at?.seconds ?? 0));
+  const rows = ok.map((r) => {
+    const p = S.players.find((x) => x.uid === r.uid);
+    const item = itemById(r.item);
+    const extra = r.item === "queue" ? (r.arg === "last" ? " (останнім)" : " (першим)") : "";
+    return `<li><span class="who">${esc(p?.displayName ?? "?")}</span><span>${esc(item?.title ?? r.item)}${extra}</span><span class="pts">−${plural(r.price ?? 0, POINTS)}</span></li>`;
+  }).join("");
+  return `<h1 class="final-title">Магазин</h1>
+    <p class="hint">Бали — це і рахунок, і гроші. Купуй на сайті до обертання барабана</p>
+    <ul class="shop-log">${rows || `<li class="muted">Поки ніхто нічого не купив</li>`}</ul>`;
+}
+
+/** Сцена тай-брейку: хто з учасників уже вставив трек. */
+function tbStageHTML() {
+  const tied = S.game.tiebreak?.tied ?? [];
+  const rows = tied.map((uid) => {
+    const p = S.players.find((x) => x.uid === uid);
+    const sub = S.tbSubs.find((x) => x.uid === uid && x.key && !x.rejected);
+    return `<li class="${sub ? "ready" : ""}">${p?.avatar ? `<img class="avatar" src="${esc(p.avatar)}" alt="">` : ""}<span class="who">${esc(p?.displayName ?? "?")}</span><span>${sub ? "✓ трек обрано" : "обирає…"}</span></li>`;
+  }).join("");
+  return `${noticeHTML()}<h1 class="final-title">Тай-брейк</h1><p class="hint">Будь-який новий трек на тему — гадаймо разом із чатом, хто що принесе</p><ul class="shop-log tb">${rows}</ul>`;
 }
 
 function viewSeats() {
@@ -922,6 +1258,7 @@ function viewSeats() {
       ${p.avatar ? `<img src="${esc(p.avatar)}" alt="">` : ""}
       <span class="name">${esc(p.displayName)}</span>
       <span class="muted small">${S.game.phase === PHASE.LOBBY ? `${p.cardCount}/${deckSize(S.game.settings)} ${p.ready ? "✓ готовий" : ""}` : p.status === "pending" ? `новачок · ${p.cardCount ?? 0}/${p.need} ${p.ready ? "✓ сяде з наступного раунду" : ""}` : p.status === "out" ? "вибув" : S.game.phase === PHASE.DISCARD && thrown.has(p.uid) ? `${plural(Math.max(0, (p.cardCount ?? 0) - 1), CARDS)} · кинув` : plural(p.cardCount ?? 0, CARDS)}</span>
+      ${(p.tokens ?? 0) > 0 ? `<span class="muted small" title="Жетони повторного обертання">🔄${p.tokens}</span>` : ""}
       <span class="score">${p.score ?? 0}</span>
       ${p.status === "active" || p.status === "pending" ? `<button class="x" data-action="kick" data-arg="${esc(p.uid)}" title="Кікнути">×</button>` : ""}
     </li>`).join("");
