@@ -120,7 +120,7 @@ function syncRound() {
   if (key === roundKey) return;
   roundSubs.forEach((off) => off());
   roundSubs = []; roundKey = key; S.round = null; S.moves = []; S.secret = null; S.collector = null;
-  S.siteVotes = []; appliedSiteVotes = new Map(); S.tbSubs = []; S.shopReqs = []; S.respins = [];
+  S.siteVotes = []; appliedSiteVotes = new Map(); S.tbSubs = []; S.shopReqs = []; S.respins = []; S.doubleReqs = [];
   if (!n) return;
   roundSubs.push(
     onSnapshot(gref("rounds", String(n)), (s) => { S.round = s.data() ?? null; updatePlayer(); render(); }),
@@ -150,6 +150,11 @@ function syncRound() {
     onSnapshot(gcol("rounds", String(n), "respin"), (s) => {
       S.respins = s.docs.map((d) => ({ uid: d.id, ...d.data() }));
       processRespins();
+    }),
+    // Жетони подвоєння: використати можна, поки не відкрито голосування.
+    onSnapshot(gcol("rounds", String(n), "double"), (s) => {
+      S.doubleReqs = s.docs.map((d) => ({ uid: d.id, ...d.data() }));
+      processDoubles();
     }),
   );
 }
@@ -840,9 +845,8 @@ async function handlePurchase(req) {
     bought.queue.add(p.uid);
     batch.update(gref(), { "mods.round": n, "mods.queue": arrayUnion({ uid: p.uid, pos: req.arg === "last" ? "last" : "first", at: Date.now() }) });
   } else if (item.id === "double") {
-    if (bought.double.has(p.uid)) return reject("Подвійний раунд уже куплено");
-    bought.double.add(p.uid);
-    batch.update(gref(), { "mods.round": n, "mods.double": arrayUnion(p.uid) });
+    // Жетон подвоєння: гравець сам вирішує, у якому раунді його використати.
+    batch.update(gref("players", p.uid), { doubleTokens: increment(1) });
   } else if (item.id === "respin") {
     batch.update(gref("players", p.uid), { tokens: increment(1) });
   } else if (item.id === "swap" || item.id === "extraCard") {
@@ -875,6 +879,30 @@ async function handlePurchase(req) {
 
 // ── Жетон повторного обертання ──────────────────────────────
 const respinUsed = new Set(); // `${spinId}|${uid}`
+
+// ── Жетон подвоєння ─────────────────────────────────────────
+const DOUBLE_PHASES = [PHASE.SHOP, PHASE.SPIN, PHASE.DISCARD, PHASE.LISTEN];
+const doubleUsed = new Set(); // `${round}|${uid}`
+
+async function processDoubles() {
+  const g = S.game;
+  if (!g || g.tiebreak || !DOUBLE_PHASES.includes(g.phase)) return;
+  const n = g.round;
+  for (const r of S.doubleReqs ?? []) {
+    const key = `${n}|${r.uid}`;
+    if (doubleUsed.has(key)) continue;
+    doubleUsed.add(key);
+    const p = S.players.find((x) => x.uid === r.uid);
+    const fresh = (await getDoc(gref("players", r.uid))).data();
+    const already = g.mods?.round === n && (g.mods.double ?? []).includes(r.uid);
+    if (!p || p.status !== "active" || already || !(fresh?.doubleTokens > 0)) continue;
+    const batch = writeBatch(db);
+    batch.update(gref("players", r.uid), { doubleTokens: increment(-1) });
+    batch.update(gref(), { "mods.round": n, "mods.double": arrayUnion(r.uid) });
+    await batch.commit();
+    log(`✖2 ${p.displayName} подвоює бали за цей раунд`);
+  }
+}
 
 async function processRespins() {
   const g = S.game;
@@ -1263,6 +1291,8 @@ function viewSeats() {
       <span class="name">${esc(p.displayName)}</span>
       <span class="muted small">${S.game.phase === PHASE.LOBBY ? `${p.cardCount}/${deckSize(S.game.settings)} ${p.ready ? "✓ готовий" : ""}` : p.status === "pending" ? `новачок · ${p.cardCount ?? 0}/${p.need} ${p.ready ? "✓ сяде з наступного раунду" : ""}` : p.status === "out" ? "вибув" : S.game.phase === PHASE.DISCARD && thrown.has(p.uid) ? `${plural(Math.max(0, (p.cardCount ?? 0) - 1), CARDS)} · кинув` : plural(p.cardCount ?? 0, CARDS)}</span>
       ${(p.tokens ?? 0) > 0 ? `<span class="muted small" title="Жетони повторного обертання">🔄${p.tokens}</span>` : ""}
+      ${(p.doubleTokens ?? 0) > 0 ? `<span class="muted small" title="Жетони подвоєння">✖2·${p.doubleTokens}</span>` : ""}
+      ${S.game.mods?.round === S.game.round && (S.game.mods.double ?? []).includes(p.uid) ? `<span class="small" title="Бали за цей раунд ×2" style="color:var(--ok)">×2</span>` : ""}
       <span class="score">${p.score ?? 0}</span>
       ${p.status === "active" || p.status === "pending" ? `<button class="x" data-action="kick" data-arg="${esc(p.uid)}" title="Кікнути">×</button>` : ""}
     </li>`).join("");

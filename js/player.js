@@ -19,7 +19,7 @@ const S = {
   request: undefined, // undefined = ще не знаємо, null = заявки немає
   deck: null, round: null, move: null, myVote: null,
   busy: false, error: "", selected: null,
-  myShop: [], tbSub: null, respinSent: null,
+  myShop: [], tbSub: null, respinSent: null, doubleSent: null,
   // Чернетки полів (patch() перемальовує розмітку й інакше губить введене).
   draft: { swapKey: "", swapUrl: "", extraUrl: "", tbUrl: "" },
 };
@@ -152,6 +152,11 @@ const actions = {
     if (item === "extraCard") S.draft.extraUrl = "";
     render();
   },
+  async useDouble() {
+    if (!canDouble()) return;
+    S.doubleSent = S.game.round; render();
+    await setDoc(gref("rounds", String(S.game.round), "double", S.uid), { at: serverTimestamp() });
+  },
   async respin() {
     const g = S.game;
     if (!canRespin()) return;
@@ -275,8 +280,28 @@ function viewStatus() {
 const SHOW_HAND = new Set([PHASE.ORIGINALITY, PHASE.SHOP, PHASE.SPIN, PHASE.LISTEN, PHASE.VOTE, PHASE.RESULTS, PHASE.TB_SUBMIT, PHASE.WHEEL]);
 
 function viewMain() {
-  const main = viewMainInner();
+  const main = viewDoubleBar() + viewMainInner();
   return S.me?.status === "active" && S.game && SHOW_HAND.has(S.game.phase) ? main + viewMyHand() : main;
+}
+
+// Жетон подвоєння: використати в поточному раунді, поки не відкрито голосування.
+const DOUBLE_PHASES = new Set([PHASE.SHOP, PHASE.SPIN, PHASE.DISCARD, PHASE.LISTEN]);
+const doubledNow = () => S.game?.mods?.round === S.game?.round && (S.game.mods.double ?? []).includes(S.uid);
+function canDouble() {
+  const g = S.game;
+  return !!g && !g.tiebreak && DOUBLE_PHASES.has(g.phase) && S.me?.status === "active"
+    && (S.me.doubleTokens ?? 0) > 0 && !doubledNow() && S.doubleSent !== g.round;
+}
+function viewDoubleBar() {
+  if (!S.game || S.me?.status !== "active" || S.game.tiebreak) return "";
+  if (doubledNow()) return `<div class="double-bar on">✖2 Бали за цей раунд подвоєні</div>`;
+  if (canDouble()) {
+    return `<div class="double-bar"><span>У тебе ${S.me.doubleTokens === 1 ? "є жетон" : `${S.me.doubleTokens} жетони`} подвоєння</span>
+      <button class="btn primary" data-action="useDouble">✖2 Подвоїти бали за цей раунд</button>
+      <span class="muted small">до початку голосування</span></div>`;
+  }
+  if (S.doubleSent === S.game.round && DOUBLE_PHASES.has(S.game.phase)) return `<div class="double-bar">Подвоєння надіслано…</div>`;
+  return "";
 }
 
 /** Мої карти: що ще в руці, а що вже зіграно чи згоріло. */
@@ -472,7 +497,6 @@ function viewShop() {
   const score = me.score ?? 0;
   const mine = S.myShop.slice().sort((a, b) => (b.at?.seconds ?? 0) - (a.at?.seconds ?? 0));
   const hasQueue = mine.some((r) => r.item === "queue" && r.status === "ok");
-  const hasDouble = mine.some((r) => r.item === "double" && r.status === "ok");
   const hand = (S.deck ?? []).filter((c) => !c.used);
   const d = S.draft;
   const cards = SHOP_ITEMS.map((item) => {
@@ -485,7 +509,7 @@ function viewShop() {
         : `<button class="btn" data-action="buy" data-arg="queue:first" ${off ? "disabled" : ""}>Першим</button>
            <button class="btn" data-action="buy" data-arg="queue:last" ${off ? "disabled" : ""}>Останнім</button>`;
     } else if (item.id === "double") {
-      action = hasDouble ? `<span class="muted small">куплено</span>` : `<button class="btn" data-action="buy" data-arg="double" ${off ? "disabled" : ""}>Купити</button>`;
+      action = `<button class="btn" data-action="buy" data-arg="double" ${off ? "disabled" : ""}>Купити</button>${me.doubleTokens ? `<span class="muted small">у тебе: ${me.doubleTokens}</span>` : ""}`;
     } else if (item.id === "respin") {
       action = `<button class="btn" data-action="buy" data-arg="respin" ${off ? "disabled" : ""}>Купити</button>${me.tokens ? `<span class="muted small">у тебе: ${me.tokens}</span>` : ""}`;
     } else if (item.id === "swap") {

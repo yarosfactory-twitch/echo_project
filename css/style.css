@@ -500,3 +500,7 @@ select { font: 1rem var(--sans); color: var(--cream); background: rgba(0,0,0,.35
 .compact-hand .sleeve { padding: 10px; }
 .compact-hand .sleeve .title { font-size: .85rem; -webkit-line-clamp: 2; }
 .compact-hand .sleeve.gone { opacity: .5; filter: grayscale(.6); }
+
+/* ── Жетон подвоєння ───────────────────── */
+.double-bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: center; margin: 0 0 16px; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--brass-dim); background: rgba(212,169,74,.1); }
+.double-bar.on { border-color: var(--ok); background: rgba(127,209,160,.12); color: var(--ok); font-weight: 800; }

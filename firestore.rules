@@ -98,6 +98,15 @@ service cloud.firestore {
           allow delete: if isHost();
         }
 
+        // Жетон подвоєння: гравець просить подвоїти бали за раунд; ведучий перевіряє жетон.
+        match /double/{uid} {
+          allow read: if isHost() || isSelf(uid);
+          allow create, update: if isSelf(uid) && isActivePlayer(g)
+            && game(g).phase in ['shop', 'spin', 'discard', 'listen'] && string(game(g).round) == n
+            && request.resource.data.keys().hasOnly(['at']);
+          allow delete: if isHost();
+        }
+
         // Тай-брейк: новий трек учасника нічиєї. Ведучий може позначити його відхиленим.
         match /tb/{uid} {
           allow read: if isHost() || isSelf(uid);

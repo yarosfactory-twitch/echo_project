@@ -5,7 +5,7 @@ export const SHOP_ITEMS = [
   { id: "queue", pct: "queue", title: "Черга", text: "Твій трек грає першим або останнім" },
   { id: "swap", pct: "swap", title: "Заміна карти", text: "Одну карту з руки замінити на новий трек" },
   { id: "extraCard", pct: "extraCard", title: "+1 карта", text: "Додати новий трек у руку" },
-  { id: "double", pct: "double", title: "Подвійний раунд", text: "Бали за цей раунд ×2" },
+  { id: "double", pct: "double", title: "Подвійний раунд", text: "Жетон: подвоїти бали за раунд. Використати можна до початку голосування" },
   { id: "respin", pct: "respin", title: "Повторне обертання", text: "Жетон: перекрутити тему після зупинки барабана, поки ведучий не почав раунд" },
 ];
 export const itemById = (id) => SHOP_ITEMS.find((i) => i.id === id);
