@@ -16,7 +16,7 @@ import { findDuplicateGroups, burnPlan, burnedKeys } from "./originality.js";
 import { connectChat } from "./chat.js";
 import { Reel, SPIN_MS } from "./reel.js";
 import { VinylWheel, WHEEL_MS } from "./wheel.js";
-import { itemById, priceOf, applyQueue, roundPoints, tiebreakOriginality, tiebreakWinners, RESPIN_WINDOW_MS, SHOP_ITEMS } from "./shop.js";
+import { itemById, priceOf, applyQueue, roundPoints, tiebreakOriginality, tiebreakWinners, SHOP_ITEMS } from "./shop.js";
 import {
   PHASE, PHASE_LABEL, MODE_LABEL, deckSize, freshThemes, roundsLeft, lateJoinOpen, lateJoinScore, cryptoRandom, shuffle, pickRandom, standings, leadersTie, DEFAULT_THEMES,
 } from "./game-logic.js";
@@ -525,8 +525,7 @@ function syncReel() {
     landedSpin = g.spin.id;
     landedSpinAt = fresh ? Date.now() : (g.spin.at ?? 0) + g.spin.ms;
     render();
-    // Вікно жетона закривається — перемалюємо кнопку «Почати раунд».
-    setTimeout(render, Math.max(0, landedSpinAt + RESPIN_WINDOW_MS - Date.now()) + 50);
+    processRespins(); // запит на перекручування міг прийти, поки барабан ще крутився
   });
 }
 
@@ -544,10 +543,7 @@ function syncWheel() {
 }
 
 /** Чи хтось за столом має жетон і вікно після зупинки ще відкрите. */
-function respinWindowOpen() {
-  const holders = activePlayers().some((p) => (p.tokens ?? 0) > 0);
-  return holders && landedSpin === S.game?.spin?.id && Date.now() - landedSpinAt < RESPIN_WINDOW_MS;
-}
+const tokenHolders = () => activePlayers().filter((p) => (p.tokens ?? 0) > 0);
 
 function canStart() {
   const ps = activePlayers();
@@ -809,7 +805,13 @@ async function processShop() {
     .sort((a, b) => (a.at?.seconds ?? 0) - (b.at?.seconds ?? 0) || (a.at?.nanoseconds ?? 0) - (b.at?.nanoseconds ?? 0));
   for (const req of pending) {
     shopDone.add(req.id);
-    try { await handlePurchase(req); } catch (e) { log(`⚠ магазин: ${e.message}`); }
+    try {
+      await handlePurchase(req);
+    } catch (e) {
+      log(`⚠ магазин: ${e.message}`);
+      // Гравець не має вічно бачити «обробляється…».
+      await updateDoc(gref("rounds", String(S.game.round), "shop", req.id), { status: "rejected", reason: "Не вдалося провести покупку, спробуй ще раз" }).catch(() => {});
+    }
   }
 }
 
@@ -832,6 +834,7 @@ async function handlePurchase(req) {
   const bought = boughtThisRound(n);
   const batch = writeBatch(db);
   const deckRef = gref("decks", p.uid);
+  let registryKey = null;
   if (item.id === "queue") {
     if (bought.queue.has(p.uid)) return reject("Черга вже куплена в цьому раунді");
     bought.queue.add(p.uid);
@@ -859,11 +862,14 @@ async function handlePurchase(req) {
     }
     batch.set(deckRef, { cards });
     batch.update(gref("players", p.uid), { cardCount: cards.filter((c) => !c.used).length });
-    if (g.settings.mode !== "hardcore") batch.set(gref("tracks", card.key), { uid: p.uid });
+    registryKey = g.settings.mode !== "hardcore" ? card.key : null;
   }
   batch.update(gref("players", p.uid), { score: increment(-price) });
   batch.update(reqRef, { status: "ok", price });
   await batch.commit();
+  // Класичний режим: трек у реєстр дублікатів. Окремо від покупки, щоб навіть
+  // за старих правил бази (без дозволу ведучому) покупка не відкочувалась.
+  if (registryKey) await setDoc(gref("tracks", registryKey), { uid: p.uid }).catch(() => {});
   log(`🛒 ${p.displayName}: ${item.title} за ${plural(price, POINTS)}`);
 }
 
@@ -872,8 +878,8 @@ const respinUsed = new Set(); // `${spinId}|${uid}`
 
 async function processRespins() {
   const g = S.game;
+  // Жетон діє після зупинки барабана, поки ведучий не почав раунд.
   if (!g || g.phase !== PHASE.SPIN || !g.spin || landedSpin !== g.spin.id) return;
-  if (Date.now() - landedSpinAt > RESPIN_WINDOW_MS + 1500) return;
   for (const r of S.respins) {
     if (r.spinId !== g.spin.id) continue;
     const key = `${r.spinId}|${r.uid}`;
@@ -1130,16 +1136,14 @@ function viewControl() {
     case PHASE.SPIN: {
       const spun = spunThisRound();
       const landed = spun && landedSpin === g.spin.id;
-      const wait = landed && respinWindowOpen();
+      const holders = landed ? tokenHolders() : [];
       const left = (g.themesLeft ?? []).length || (g.tiebreak ? (S.themesPool ?? DEFAULT_THEMES).length : 0);
       const tb = g.tiebreak ? `<p class="hint">Тай-брейк: ${esc(tiedNames())}. Після теми в них буде ${Math.round((g.settings.tiebreakSeconds ?? 180) / 60)} хв на новий трек.</p>` : "";
       body = tb + (!spun
         ? `<p class="muted">Тем у барабані: ${left}</p>${b("spin", "Крутити барабан", { primary: true, disabled: !left })}`
         : !landed
           ? `<p class="muted">Барабан крутиться…</p>${b("startRound", "Почати раунд", { disabled: true })}`
-          : wait
-            ? `<p class="muted">У гравців є жетони повторного обертання: 10 секунд на рішення…</p>${b("startRound", "Почати раунд", { disabled: true })}`
-            : `<p class="muted">Тема обрана. Прокоментуй і запускай ${g.tiebreak ? "тай-брейк" : "раунд"}.</p>${b("startRound", g.tiebreak ? "Почати тай-брейк" : "Почати раунд", { primary: true })}`);
+          : `${holders.length ? `<p class="muted small">🔄 Жетон є в: ${esc(holders.map((p) => p.displayName).join(", "))} — можуть перекрутити, поки ти не почав раунд</p>` : ""}<p class="muted">Тема обрана. Прокоментуй і запускай ${g.tiebreak ? "тай-брейк" : "раунд"}.</p>${b("startRound", g.tiebreak ? "Почати тай-брейк" : "Почати раунд", { primary: true })}`);
       break;
     }
     case PHASE.TB_SUBMIT: {

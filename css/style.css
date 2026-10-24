@@ -494,3 +494,9 @@ select { font: 1rem var(--sans); color: var(--cream); background: rgba(0,0,0,.35
   border-left: 14px solid transparent; border-right: 14px solid transparent; border-top: 34px solid var(--brass); filter: drop-shadow(0 3px 4px rgba(0,0,0,.6)); }
 .wheel.landed .wheel-needle { animation: band-glow 1.2s ease-out; }
 .wheel + * , #wheel:not([hidden]) { margin-top: 26px; }
+
+/* ── Твої карти ────────────────────────── */
+.my-hand .deck.compact-hand { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; margin: 10px 0; }
+.compact-hand .sleeve { padding: 10px; }
+.compact-hand .sleeve .title { font-size: .85rem; -webkit-line-clamp: 2; }
+.compact-hand .sleeve.gone { opacity: .5; filter: grayscale(.6); }

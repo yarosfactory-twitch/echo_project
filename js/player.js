@@ -9,7 +9,7 @@ import { PHASE, PHASE_LABEL, deckSize, lateJoinOpen } from "./game-logic.js";
 import { MAX_PLAYERS } from "./config.js";
 import { Reel } from "./reel.js";
 import { VinylWheel } from "./wheel.js";
-import { SHOP_ITEMS, priceOf, RESPIN_WINDOW_MS } from "./shop.js";
+import { SHOP_ITEMS, priceOf } from "./shop.js";
 import { $, esc, patch, fmtCountdown, sourceLabel, tableHTML, standingsHTML, originalityHTML, flipClass, plural, POINTS } from "./ui.js";
 
 const els = { me: $("#me"), status: $("#status"), main: $("#main"), table: $("#table") };
@@ -271,7 +271,30 @@ function viewStatus() {
   return `${notice}<div class="phase">${esc(PHASE_LABEL[g.phase] ?? g.phase)}${round}</div>${theme}<div id="countdown" class="countdown"></div>`;
 }
 
+// Фази, у яких гравцеві за столом показуємо його руку (у лобі — збір колоди, при виборі — вибір карти).
+const SHOW_HAND = new Set([PHASE.ORIGINALITY, PHASE.SHOP, PHASE.SPIN, PHASE.LISTEN, PHASE.VOTE, PHASE.RESULTS, PHASE.TB_SUBMIT, PHASE.WHEEL]);
+
 function viewMain() {
+  const main = viewMainInner();
+  return S.me?.status === "active" && S.game && SHOW_HAND.has(S.game.phase) ? main + viewMyHand() : main;
+}
+
+/** Мої карти: що ще в руці, а що вже зіграно чи згоріло. */
+function viewMyHand() {
+  const deck = S.deck ?? [];
+  if (!deck.length) return "";
+  const hand = deck.filter((c) => !c.used);
+  const gone = deck.filter((c) => c.used);
+  const card = (c, cls = "") => `<li class="sleeve face ${cls}"><span class="src">${sourceLabel(c.source)}${startBadge(c)}</span><span class="title">${esc(c.title)}</span>
+      ${c.burned ? `<span class="vote-badge mine">згоріла</span>` : c.used ? `<span class="vote-badge mine">зіграна</span>` : ""}</li>`;
+  return `<section class="panel my-hand">
+    <h2>Твої карти <span class="muted">${hand.length ? `у руці ${hand.length}` : "у руці порожньо"}</span></h2>
+    ${hand.length ? `<ul class="deck compact-hand">${hand.map((c) => card(c)).join("")}</ul>` : `<p class="muted">Карт не лишилось: у наступних раундах автоматичний пас. Можна докупити в магазині.</p>`}
+    ${gone.length ? `<details><summary>Зіграні та згорілі (${gone.length})</summary><ul class="deck compact-hand">${gone.map((c) => card(c, "gone")).join("")}</ul></details>` : ""}
+  </section>`;
+}
+
+function viewMainInner() {
   if (S.gameId === null) return `<section class="panel center"><h2>Зараз гри немає</h2><p class="muted">Заходь, коли ведучий відкриє лобі на стрімі.</p></section>`;
   if (!S.game) return `<p class="muted">Завантаження…</p>`;
   if (!S.me) return viewJoin();
@@ -297,7 +320,7 @@ function viewMain() {
       const tb = S.game.tiebreak ? `<h2>Нічия! Тай-брейк</h2><p>${esc(tiedNames())}</p>` : "";
       const text = !spun ? "Зараз ведучий крутитиме барабан тем" : landedSpin === S.game.spin.id ? "Тема обрана. Чекаємо, поки ведучий почне раунд" : "Барабан крутиться…";
       const respin = canRespin()
-        ? `<p><button class="btn primary" data-action="respin">🔄 Перекрутити (жетон: ${S.me.tokens})</button></p><p class="muted small">Залишилось кілька секунд, щоб використати жетон</p>`
+        ? `<p><button class="btn primary" data-action="respin">🔄 Перекрутити (жетон: ${S.me.tokens})</button></p><p class="muted small">Не подобається тема? Можна перекрутити, поки ведучий не почав раунд</p>`
         : S.respinSent === S.game.spin?.id ? `<p class="muted small">Жетон надіслано…</p>` : "";
       return `<section class="panel center">${tb}<p class="muted">${text}</p>${respin}</section>`;
     }
@@ -433,12 +456,11 @@ const startBadge = (c) => (c.start ? ` · <span class="start">▶ з ${formatTim
 const tiedNames = () => (S.game?.tiebreak?.tied ?? []).map((uid) => S.players.find((p) => p.uid === uid)?.displayName ?? "?").join(" · ");
 const isTied = () => (S.game?.tiebreak?.tied ?? []).includes(S.uid);
 
-/** Жетон повторного обертання: 10 с після зупинки барабана. */
+/** Жетон повторного обертання: після зупинки барабана, поки ведучий не почав раунд. */
 function canRespin() {
   const g = S.game;
   return g?.phase === PHASE.SPIN && S.me?.status === "active" && (S.me.tokens ?? 0) > 0
-    && g.spin?.round === g.round && landedSpin === g.spin.id && S.respinSent !== g.spin.id
-    && Date.now() - landedSpinAt < RESPIN_WINDOW_MS;
+    && g.spin?.round === g.round && landedSpin === g.spin.id && S.respinSent !== g.spin.id;
 }
 
 const ITEM_ICON = { queue: "⏭", swap: "🔁", extraCard: "➕", double: "✖2", respin: "🔄" };
@@ -534,7 +556,6 @@ function syncReel() {
     landedSpin = g.spin.id;
     landedSpinAt = fresh ? Date.now() : (g.spin.at ?? 0) + g.spin.ms;
     render();
-    setTimeout(render, Math.max(0, landedSpinAt + RESPIN_WINDOW_MS - Date.now()) + 50); // сховати кнопку жетона
   });
 }
 

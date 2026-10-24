@@ -6,15 +6,13 @@ export const SHOP_ITEMS = [
   { id: "swap", pct: "swap", title: "Заміна карти", text: "Одну карту з руки замінити на новий трек" },
   { id: "extraCard", pct: "extraCard", title: "+1 карта", text: "Додати новий трек у руку" },
   { id: "double", pct: "double", title: "Подвійний раунд", text: "Бали за цей раунд ×2" },
-  { id: "respin", pct: "respin", title: "Повторне обертання", text: "Жетон: перекрутити тему протягом 10 с після зупинки барабана" },
+  { id: "respin", pct: "respin", title: "Повторне обертання", text: "Жетон: перекрутити тему після зупинки барабана, поки ведучий не почав раунд" },
 ];
 export const itemById = (id) => SHOP_ITEMS.find((i) => i.id === id);
 
 /** Ціна: відсоток від балів, з округленням угору, мінімум 1 бал. */
 export const priceOf = (score, percent) => Math.max(1, Math.ceil(((score ?? 0) * (percent ?? 0)) / 100));
 
-/** Скільки секунд після зупинки барабана діє жетон повторного обертання. */
-export const RESPIN_WINDOW_MS = 10_000;
 
 /**
  * Порядок треків з урахуванням «Черги». Спершу випадкове перемішування (shuffled),

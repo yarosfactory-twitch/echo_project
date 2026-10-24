@@ -56,10 +56,11 @@ service cloud.firestore {
       // запис буде відхилено. У хардкорі реєстр не використовується.
       match /tracks/{key} {
         allow read: if isHost();
-        allow create: if ((isActivePlayer(g) && game(g).phase == 'lobby') || isPendingPlayer(g))
+        // Ведучий реєструє трек, куплений у магазині («+1 карта», «Заміна карти»).
+        allow create: if isHost() || (((isActivePlayer(g) && game(g).phase == 'lobby') || isPendingPlayer(g))
           && game(g).settings.mode != 'hardcore'
           && request.resource.data.keys().hasOnly(['uid'])
-          && request.resource.data.uid == request.auth.uid;
+          && request.resource.data.uid == request.auth.uid);
         allow delete: if isHost() || (signedIn() && resource.data.uid == request.auth.uid);
       }
 
