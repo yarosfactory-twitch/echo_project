@@ -41,24 +41,38 @@ export const cardsInHand = (p, threwThisRound) => Math.max(0, (p.cardCount ?? 0)
 
 /** Стіл: віяла карт гравців і карти, кинуті в центр. Спільний для гравця й ведучого.
  *  @param {{players: object[], phase: string, thrown: Set<string>, meUid?: string}} o */
-export function tableHTML({ players, phase, thrown, meUid = null }) {
+export function tableHTML({ players, phase, thrown, passed = new Set(), meUid = null, round = "" }) {
   const seats = players.filter((p) => p.status === "active" || p.status === "out");
   if (!seats.length) return "";
   const showThrown = phase === "discard";
   const seatHTML = seats.map((p) => {
     const threw = showThrown && thrown.has(p.uid);
+    const pass = showThrown && passed.has(p.uid);
+    // Карта летить у центр лише раз — у момент ходу, а не при кожному перемальовуванні.
+    const toss = threw && onceFresh(`toss-${round}-${p.uid}`, 900);
     return `<div class="seat ${p.status}${p.uid === meUid ? " me" : ""}">
       ${fanHTML(p.status === "active" ? cardsInHand(p, threw) : 0)}
       <div class="name">${esc(p.displayName)}${phase === "lobby" ? (p.ready ? " ✓" : "") : ""}</div>
-      <div class="score">${p.status === "out" ? "вибув" : `${p.score ?? 0} б.`}</div>
-      ${threw ? `<span class="sleeve back thrown"></span>` : ""}
+      <div class="score">${p.status === "out" ? "вибув" : pass ? "пас" : `${p.score ?? 0} б.`}</div>
+      ${toss ? `<span class="sleeve back thrown"></span>` : ""}
     </div>`;
   }).join("");
   const pile = showThrown
-    ? `<div class="pile">${[...thrown].map((_, i) => `<span class="sleeve back" style="--r:${((i * 37) % 30) - 15}deg"></span>`).join("")}</div>
-       <div class="pile-label">${plural(thrown.size, CARDS)} у центрі</div>`
+    ? `<div class="pile">${[...thrown].map((uid, i) => {
+        const land = onceFresh(`land-${round}-${uid}`, 700) ? " land" : "";
+        return `<span class="sleeve back${land}" style="--r:${((i * 37) % 30) - 15}deg"></span>`;
+      }).join("")}</div>
+       <div class="pile-label">${plural(thrown.size, CARDS)} у центрі${passed.size ? ` · пас: ${passed.size}` : ""}</div>`
     : "";
   return `<div class="felt-table"><div class="center-pile">${pile}</div>${seatHTML}</div>`;
+}
+
+// Чи подія «свіжа»: true протягом ms від першого виклику з цим ключем (для одноразових анімацій).
+const firstSeenAt = new Map();
+export function onceFresh(key, ms) {
+  const now = Date.now();
+  if (!firstSeenAt.has(key)) firstSeenAt.set(key, now);
+  return now - firstSeenAt.get(key) < ms;
 }
 
 /** Підсумок гри: зверху ті, хто дійшов до кінця, нижче вибулі.

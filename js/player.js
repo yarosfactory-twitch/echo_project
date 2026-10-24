@@ -212,8 +212,11 @@ const actions = {
 };
 
 async function sendMove(type) {
-  if (!S.selected || S.move) return;
-  await setDoc(gref("rounds", String(S.game.round), "moves", S.uid), { type, cardKey: S.selected, at: serverTimestamp() });
+  if (S.move || (type === "discard" && !S.selected)) return;
+  // Пас не потребує карти: 0 балів, рука лишається як є.
+  await setDoc(gref("rounds", String(S.game.round), "moves", S.uid), {
+    type, cardKey: type === "pass" ? "" : S.selected, at: serverTimestamp(), // "" — сумісно зі старими правилами
+  });
 }
 
 async function addCard(url) {
@@ -424,7 +427,7 @@ function viewDeckBuilder() {
 
 function viewHand() {
   if (S.move) {
-    const text = S.move.type === "pass" ? "Ти пасуєш у цьому раунді." : "Карту кинуто на стіл.";
+    const text = S.move.type === "pass" ? "Ти пасуєш у цьому раунді. Карти лишились у руці." : "Карту кинуто на стіл.";
     return `<section class="panel center"><h2>${text}</h2><p class="muted">Чекаємо на інших гравців.</p></section>`;
   }
   const hand = (S.deck ?? []).filter((c) => !c.used);
@@ -439,9 +442,9 @@ function viewHand() {
     <ul class="deck hand">${cards}</ul>
     <div class="row">
       <button class="btn primary" data-action="discard" ${S.selected ? "" : "disabled"}>Зіграти карту</button>
-      <button class="btn" data-action="pass" ${S.selected ? "" : "disabled"} title="Обрана карта згорить, 0 балів за раунд">Пас</button>
+      <button class="btn" data-action="pass" title="0 балів за раунд, усі карти лишаються в руці">Пас</button>
     </div>
-    <p class="muted small">Не встигнеш ні зіграти карту, ні пасувати — вибуваєш.</p>
+    <p class="muted small">Пас — 0 балів за раунд, карти лишаються в руці. Не встигнеш ні зіграти карту, ні пасувати — вибуваєш.</p>
   </section>`;
 }
 
@@ -485,7 +488,10 @@ function viewFinal() {
 
 function viewTable() {
   if (!S.game || S.game.phase === PHASE.FINAL) return "";
-  return tableHTML({ players: S.players, phase: S.game.phase, thrown: new Set(S.round?.thrown ?? []), meUid: S.uid });
+  return tableHTML({
+    players: S.players, phase: S.game.phase, meUid: S.uid, round: `${S.gameId}-${S.game.round}`,
+    thrown: new Set(S.round?.thrown ?? []), passed: new Set(S.round?.passed ?? []),
+  });
 }
 
 const startBadge = (c) => (c.start ? ` · <span class="start">▶ з ${formatTimecode(c.start)}</span>` : "");

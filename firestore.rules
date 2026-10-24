@@ -75,7 +75,8 @@ service cloud.firestore {
           allow create: if isSelf(uid) && isActivePlayer(g)
             && game(g).phase == 'discard' && string(game(g).round) == n
             && request.resource.data.type in ['discard', 'pass']
-            && request.resource.data.cardKey is string;
+            && (request.resource.data.cardKey is string
+                || (request.resource.data.type == 'pass' && request.resource.data.cardKey == null));
           allow delete: if isHost();
         }
 

@@ -574,11 +574,14 @@ const hasCards = (p) => (p.cardCount ?? 0) > 0;
 
 function onMovesChanged() {
   if (S.game?.phase !== PHASE.DISCARD) return;
-  const thrown = S.moves.map((m) => m.uid);
-  if (S.round && (S.round.thrown ?? []).length !== thrown.length) {
-    updateDoc(gref("rounds", String(S.game.round)), { thrown }).catch(() => {});
+  // thrown — хто зіграв карту (карта летить у центр), passed — хто пасував.
+  const thrown = S.moves.filter((m) => m.type !== "pass").map((m) => m.uid);
+  const passed = S.moves.filter((m) => m.type === "pass").map((m) => m.uid);
+  if (S.round && ((S.round.thrown ?? []).length !== thrown.length || (S.round.passed ?? []).length !== passed.length)) {
+    updateDoc(gref("rounds", String(S.game.round)), { thrown, passed }).catch(() => {});
   }
-  const waiting = activePlayers().filter((p) => hasCards(p) && !thrown.includes(p.uid));
+  const moved = S.moves.map((m) => m.uid);
+  const waiting = activePlayers().filter((p) => hasCards(p) && !moved.includes(p.uid));
   if (!waiting.length && activePlayers().length) A.closeDiscard();
 }
 
@@ -601,6 +604,7 @@ async function closeDiscard() {
       continue;
     }
     stillIn++;
+    if (move.type === "pass") continue; // пас: 0 балів, усі карти лишаються в руці
     const card = cards.find((c) => c.key === move.cardKey && !c.used);
     if (!card) continue; // невалідна карта: 0 балів, нічого не згорає
     card.used = true;
@@ -1202,7 +1206,7 @@ function viewControl() {
       break;
     }
     case PHASE.DISCARD:
-      body = `<p class="muted">Зіграли карту: ${S.moves.length} / ${activePlayers().filter(hasCards).length}</p>${b("closeDiscard", "Завершити скидання зараз")}`;
+      body = `<p class="muted">Зробили хід: ${S.moves.length} / ${activePlayers().filter(hasCards).length}</p>${b("closeDiscard", "Завершити скидання зараз")}`;
       break;
     case PHASE.LISTEN:
       body = `<div class="row">${plays.map((p) => b("play", `№${p.slot}`, { arg: p.slot, primary: g.nowPlaying === p.slot })).join("")}</div>
@@ -1237,7 +1241,11 @@ function viewStage() {
   if (g.phase === PHASE.SPIN && g.tiebreak) return `${noticeHTML()}<h1 class="final-title">Нічия! Тай-брейк</h1><p class="hint">${esc(tiedNames())}</p>`;
   // Поки гравці обирають карти — показуємо стіл, як у гравців.
   if (g.phase === PHASE.DISCARD) {
-    return `<div class="stage-table">${tableHTML({ players: S.players, phase: g.phase, thrown: new Set(S.moves.map((m) => m.uid)) })}</div>`;
+    return `<div class="stage-table">${tableHTML({
+      players: S.players, phase: g.phase, round: `${S.gameId}-${g.round}`,
+      thrown: new Set(S.moves.filter((m) => m.type !== "pass").map((m) => m.uid)),
+      passed: new Set(S.moves.filter((m) => m.type === "pass").map((m) => m.uid)),
+    })}</div>`;
   }
   const plays = S.round?.plays ?? [];
   const revealed = new Set(g.revealed ?? []);
@@ -1298,11 +1306,12 @@ function tbStageHTML() {
 
 function viewSeats() {
   if (!S.game) return "";
-  const thrown = new Set(S.moves.map((m) => m.uid));
+  const thrown = new Set(S.moves.filter((m) => m.type !== "pass").map((m) => m.uid));
+  const passed = new Set(S.moves.filter((m) => m.type === "pass").map((m) => m.uid));
   const rows = S.players.slice().sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).map((p) => `<li class="${p.status}">
       ${p.avatar ? `<img src="${esc(p.avatar)}" alt="">` : ""}
       <span class="name">${esc(p.displayName)}</span>
-      <span class="muted small">${S.game.phase === PHASE.LOBBY ? `${p.cardCount}/${deckSize(S.game.settings)} ${p.ready ? "✓ готовий" : ""}` : p.status === "pending" ? `новачок · ${p.cardCount ?? 0}/${p.need} ${p.ready ? "✓ сяде з наступного раунду" : ""}` : p.status === "out" ? "вибув" : S.game.phase === PHASE.DISCARD && thrown.has(p.uid) ? `${plural(Math.max(0, (p.cardCount ?? 0) - 1), CARDS)} · кинув` : plural(p.cardCount ?? 0, CARDS)}</span>
+      <span class="muted small">${S.game.phase === PHASE.LOBBY ? `${p.cardCount}/${deckSize(S.game.settings)} ${p.ready ? "✓ готовий" : ""}` : p.status === "pending" ? `новачок · ${p.cardCount ?? 0}/${p.need} ${p.ready ? "✓ сяде з наступного раунду" : ""}` : p.status === "out" ? "вибув" : S.game.phase === PHASE.DISCARD && thrown.has(p.uid) ? `${plural(Math.max(0, (p.cardCount ?? 0) - 1), CARDS)} · зіграв` : S.game.phase === PHASE.DISCARD && passed.has(p.uid) ? `${plural(p.cardCount ?? 0, CARDS)} · пас` : plural(p.cardCount ?? 0, CARDS)}</span>
       ${(p.tokens ?? 0) > 0 ? `<span class="muted small" title="Жетони повторного обертання">🔄${p.tokens}</span>` : ""}
       ${(p.doubleTokens ?? 0) > 0 ? `<span class="muted small" title="Жетони подвоєння">✖2·${p.doubleTokens}</span>` : ""}
       ${S.game.mods?.round === S.game.round && (S.game.mods.double ?? []).includes(p.uid) ? `<span class="small" title="Бали за цей раунд ×2" style="color:var(--ok)">×2</span>` : ""}
