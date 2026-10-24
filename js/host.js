@@ -76,6 +76,7 @@ function boot() {
   });
   onSnapshot(doc(db, "themes", "pool"), (s) => { S.themesPool = s.data()?.list ?? null; render(); });
   connectChat(TWITCH_CHANNEL, onChatMessage, (st) => { S.chat = st; render(); });
+  loadSoundCloudApi().catch(() => {}); // завантажуємо наперед, щоб встигнути до READY плеєра
 }
 
 function subscribeGame(id) {
@@ -576,14 +577,24 @@ function loadSoundCloudApi() {
   return scApi;
 }
 
+/** Перемотка SoundCloud на таймкод. Подія READY могла вже пройти, поки
+ *  вантажився api.js, тому перемотуємо також на першому PLAY і ще раз
+ *  перевіряємо позицію через пару секунд. */
 async function seekSoundCloud(iframe, startSec) {
   try {
     const SC = await loadSoundCloudApi();
     const widget = SC.Widget(iframe);
-    widget.bind(SC.Widget.Events.READY, () => {
-      widget.seekTo(startSec * 1000);
-      widget.play();
-    });
+    const target = startSec * 1000;
+    let done = false;
+    const seek = () => {
+      widget.getPosition((pos) => {
+        if (pos < target - 1500) widget.seekTo(target);
+        done = true;
+      });
+    };
+    widget.bind(SC.Widget.Events.READY, () => { widget.seekTo(target); widget.play(); });
+    widget.bind(SC.Widget.Events.PLAY, () => { if (!done) seek(); });
+    setTimeout(seek, 2500);
   } catch (e) {
     log(`⚠ ${e.message}: трек грає з початку`);
   }

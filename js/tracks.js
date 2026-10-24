@@ -81,6 +81,9 @@ export function extractSoundCloudId(html = "") {
 
 /** Перевіряє, що трек існує і його можна вбудувати.
  *  → { key, source, id, url, title, author } або кидає TrackError. */
+export const SHORT_LINK_HINT =
+  "SoundCloud не розпізнав коротке посилання. Відкрий його в браузері й скопіюй повну адресу з рядка (soundcloud.com/виконавець/трек)";
+
 export async function resolveTrack(raw) {
   const parsed = parseTrackUrl(raw);
   if (!parsed) throw new TrackError("Це не схоже на посилання на трек YouTube або SoundCloud");
@@ -127,7 +130,9 @@ async function resolveSoundCloud(url) {
   } catch {
     throw new TrackError("Не вдалося перевірити трек SoundCloud, спробуй ще раз");
   }
-  if (!res.ok) throw new TrackError("Трек SoundCloud не знайдено або він приватний");
+  if (!res.ok) {
+    throw new TrackError(url.includes("on.soundcloud.com") ? SHORT_LINK_HINT : "Трек SoundCloud не знайдено або він приватний");
+  }
   const data = await res.json();
   const html = String(data.html ?? "");
   let decoded = html;
@@ -140,7 +145,12 @@ async function resolveSoundCloud(url) {
   if (id) return { key: `sc_${id}`, id, ...meta };
   // Запасний шлях: невідомий формат — беремо готовий плеєр з відповіді SoundCloud.
   const embed = html.match(/src="([^"]+)"/)?.[1]?.replace(/&amp;/g, "&");
-  if (!embed) throw new TrackError("Не вдалося розпізнати трек SoundCloud, спробуй повне посилання");
+  // Плеєр SoundCloud не приймає короткі посилання on.soundcloud.com
+  // («You have not provided a valid SoundCloud URL»), тож такий плеєр не годиться.
+  const embedTarget = embed ? new URL(embed).searchParams.get("url") ?? "" : "";
+  if (!embed || /on\.soundcloud\.com/.test(embedTarget)) {
+    throw new TrackError(SHORT_LINK_HINT);
+  }
   return { key: `sc_${new URL(url).pathname.replace(/\W+/g, "_")}`, id: null, embed, ...meta };
 }
 
