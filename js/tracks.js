@@ -64,10 +64,19 @@ export function parseTrackUrl(raw) {
 
 /** ID треку з html-коду вбудовування SoundCloud. Плейлисти → null. */
 export function extractSoundCloudId(html = "") {
-  let text = html;
-  try { text = decodeURIComponent(html); } catch { /* залишаємо як є */ }
-  const m = text.match(/\b(tracks|playlists)[/:](\d+)/);
-  return m && m[1] === "tracks" ? m[2] : null;
+  // SoundCloud кодує адресу по-різному: tracks/123, tracks%2F123, а новіші
+  // вбудовування — двічі: tracks%2Fsoundcloud%253Atracks%253A123. Розкодовуємо,
+  // поки є що розкодовувати, і шукаємо обидва формати.
+  let text = String(html);
+  for (let i = 0; i < 4; i++) {
+    let next;
+    try { next = decodeURIComponent(text); } catch { break; }
+    if (next === text) break;
+    text = next;
+  }
+  if (/playlists[/:]\d+|soundcloud:playlists:\d+/.test(text) && !/tracks[/:]\d+|soundcloud:tracks:\d+/.test(text)) return null;
+  const m = text.match(/soundcloud:tracks:(\d+)/) ?? text.match(/\btracks[/:](\d+)/);
+  return m ? m[1] : null;
 }
 
 /** Перевіряє, що трек існує і його можна вбудувати.
@@ -120,9 +129,19 @@ async function resolveSoundCloud(url) {
   }
   if (!res.ok) throw new TrackError("Трек SoundCloud не знайдено або він приватний");
   const data = await res.json();
-  const id = extractSoundCloudId(data.html);
-  if (!id) throw new TrackError("Це не окремий трек SoundCloud (плейлист чи профіль?)");
-  return { key: `sc_${id}`, source: "soundcloud", id, url, title: data.title || "Без назви", author: data.author_name || "" };
+  const html = String(data.html ?? "");
+  let decoded = html;
+  for (let i = 0; i < 4; i++) { try { const n = decodeURIComponent(decoded); if (n === decoded) break; decoded = n; } catch { break; } }
+  if (/playlists|\/sets\//.test(decoded) && !/tracks/.test(decoded)) {
+    throw new TrackError("Це плейлист SoundCloud, а треба окремий трек");
+  }
+  const meta = { source: "soundcloud", url, title: data.title || "Без назви", author: data.author_name || "" };
+  const id = extractSoundCloudId(html);
+  if (id) return { key: `sc_${id}`, id, ...meta };
+  // Запасний шлях: невідомий формат — беремо готовий плеєр з відповіді SoundCloud.
+  const embed = html.match(/src="([^"]+)"/)?.[1]?.replace(/&amp;/g, "&");
+  if (!embed) throw new TrackError("Не вдалося розпізнати трек SoundCloud, спробуй повне посилання");
+  return { key: `sc_${new URL(url).pathname.replace(/\W+/g, "_")}`, id: null, embed, ...meta };
 }
 
 /** Адреса плеєра для iframe на сторінці ведучого. YouTube стартує з card.start;
@@ -131,6 +150,11 @@ export function embedUrl(card) {
   if (card.source === "youtube") {
     const start = card.start ? `&start=${Math.floor(card.start)}` : "";
     return `https://www.youtube.com/embed/${card.id}?autoplay=1&rel=0${start}`;
+  }
+  if (!card.id && card.embed) {
+    const u = new URL(card.embed);
+    u.searchParams.set("auto_play", "true");
+    return u.toString();
   }
   const api = `https://api.soundcloud.com/tracks/${card.id}`;
   return `https://w.soundcloud.com/player/?url=${encodeURIComponent(api)}&auto_play=true&visual=true`;

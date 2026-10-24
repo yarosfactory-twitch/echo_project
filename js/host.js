@@ -420,7 +420,7 @@ async function closeDiscard() {
   // TODO: плюшка «Черга» (перший/останній) змінює порядок після перемішування.
   const ordered = shuffle(plays).map((x, i) => ({ ...x, slot: i + 1 }));
   batch.set(gref("rounds", String(n)), {
-    plays: ordered.map(({ slot, card }) => ({ slot, source: card.source, id: card.id, url: card.url, title: card.title, start: card.start ?? 0 })),
+    plays: ordered.map(({ slot, card }) => ({ slot, source: card.source, id: card.id, embed: card.embed ?? null, url: card.url, title: card.title, start: card.start ?? 0 })),
     revealed: false,
   }, { merge: true });
   batch.set(gref("secret", `round_${n}`), {

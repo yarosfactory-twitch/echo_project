@@ -111,3 +111,19 @@ test("Таймкод з посилань YouTube і SoundCloud", () => {
   assert.equal(formatTimecode(83), "1:23");
   assert.equal(formatTimecode(3723), "1:02:03");
 });
+
+test("SoundCloud: ID з різних форматів вбудовування", () => {
+  const old = '<iframe src="https://w.soundcloud.com/player/?visual=true&url=https%3A%2F%2Fapi.soundcloud.com%2Ftracks%2F123456&show_artwork=true"></iframe>';
+  const urn = '<iframe src="https://w.soundcloud.com/player/?visual=true&url=https%3A%2F%2Fapi.soundcloud.com%2Ftracks%2Fsoundcloud%253Atracks%253A1987654321&show_artwork=true"></iframe>';
+  const urnOnce = 'url=https%3A%2F%2Fapi.soundcloud.com%2Ftracks%2Fsoundcloud%3Atracks%3A42';
+  const pl = 'url=https%3A%2F%2Fapi.soundcloud.com%2Fplaylists%2Fsoundcloud%253Aplaylists%253A777';
+  assert.equal(extractSoundCloudId(old), "123456");
+  assert.equal(extractSoundCloudId(urn), "1987654321");
+  assert.equal(extractSoundCloudId(urnOnce), "42");
+  assert.equal(extractSoundCloudId(pl), null);
+  // Посилання користувача: параметри відкидаються, таймкод зчитується
+  const link = "https://soundcloud.com/donerkeb1b/lna?si=a15198d2eee84bc7bce2b4e8b49861f9&utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing#t=1%3A00";
+  assert.deepEqual(parseTrackUrl(link), { source: "soundcloud", url: "https://soundcloud.com/donerkeb1b/lna" });
+  assert.equal(parseStartTime(link), 60);
+  assert.deepEqual(parseTrackUrl("https://on.soundcloud.com/FLLRgtpVhWbelNIe5A"), { source: "soundcloud", url: "https://on.soundcloud.com/FLLRgtpVhWbelNIe5A" });
+});
