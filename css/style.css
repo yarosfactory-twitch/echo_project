@@ -418,3 +418,9 @@ summary { cursor: pointer; color: var(--muted); }
 .stage-final .standings { max-width: 720px; }
 .stage-final .standings-list li { padding: 14px 18px; }
 .final-title { text-align: center; font-size: clamp(2rem, 4vw, 3.2rem); color: var(--brass); margin: 0 0 8px; }
+/* До обертання: смуга порожня, з підказкою */
+.reel.idle .reel-band::after {
+  content: "крути барабан"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-size: calc(var(--row-h) * .22); letter-spacing: .2em; text-transform: uppercase; color: var(--brass);
+  background: rgba(6,22,16,.82);
+}

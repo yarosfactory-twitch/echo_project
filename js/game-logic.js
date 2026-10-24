@@ -30,7 +30,14 @@ export const MODE_LABEL = { classic: "класичний", hardcore: "хардк
 
 export const deckSize = (settings) => settings.rounds + settings.extraCards;
 
-export function shuffle(items, rnd = Math.random) {
+/** Криптографічний генератор у [0, 1): рівномірніший за Math.random. */
+export function cryptoRandom() {
+  const buf = new Uint32Array(1);
+  globalThis.crypto.getRandomValues(buf);
+  return buf[0] / 2 ** 32;
+}
+
+export function shuffle(items, rnd = cryptoRandom) {
   const a = [...items];
   for (let i = a.length - 1; i > 0; i--) {
     const j = Math.floor(rnd() * (i + 1));
@@ -39,7 +46,7 @@ export function shuffle(items, rnd = Math.random) {
   return a;
 }
 
-export const pickRandom = (items, rnd = Math.random) => items[Math.floor(rnd() * items.length)];
+export const pickRandom = (items, rnd = cryptoRandom) => items[Math.floor(rnd() * items.length)];
 
 const byScore = (a, b) => (b.score ?? 0) - (a.score ?? 0);
 

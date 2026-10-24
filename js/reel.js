@@ -60,7 +60,8 @@ export class Reel {
     this.track.style.transform = "translateY(0px)";
   }
 
-  /** Барабан у спокої до обертання: просто список тем. */
+  /** Барабан у спокої до обертання. Стрічка зсунута на пів рядка, щоб у золотій
+   *  смузі не стояла жодна тема (інакше перша тема пулу виглядає вже обраною). */
   idle(list) {
     const key = `idle:${list.join("\u0001")}`;
     this.root.hidden = false;
@@ -68,7 +69,9 @@ export class Reel {
     this.key = key;
     clearTimeout(this.timer);
     this.root.classList.remove("landed");
+    this.root.classList.add("idle");
     this.build(list.length ? list : ["—"]);
+    this.track.style.transform = `translateY(${this.rowH() / 2}px)`;
   }
 
   /**
@@ -83,7 +86,7 @@ export class Reel {
     if (this.key === key) return;
     this.key = key;
     clearTimeout(this.timer);
-    this.root.classList.remove("landed");
+    this.root.classList.remove("landed", "idle");
     this.build(spin.list);
     const y = (CENTER_ROW - landingRow(spin.list.length, spin.target)) * this.rowH();
     const land = () => {

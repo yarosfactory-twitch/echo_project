@@ -127,3 +127,13 @@ test("SoundCloud: ID з різних форматів вбудовування",
   assert.equal(parseStartTime(link), 60);
   assert.deepEqual(parseTrackUrl("https://on.soundcloud.com/FLLRgtpVhWbelNIe5A"), { source: "soundcloud", url: "https://on.soundcloud.com/FLLRgtpVhWbelNIe5A" });
 });
+
+import { cryptoRandom, pickRandom as pick } from "../js/game-logic.js";
+test("Вибір теми рівномірний: за 22 000 спроб кожна з 22 тем випадає приблизно 1000 разів", () => {
+  const items = Array.from({ length: 22 }, (_, i) => i);
+  const counts = new Array(22).fill(0);
+  for (let i = 0; i < 22000; i++) counts[pick(items)]++;
+  for (const c of counts) assert.ok(c > 800 && c < 1200, `нерівномірно: ${counts}`);
+  const r = cryptoRandom();
+  assert.ok(r >= 0 && r < 1);
+});
