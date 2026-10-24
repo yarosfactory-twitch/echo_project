@@ -3,7 +3,7 @@
 import {
   db, waitForUser, signInHost, signOut, auth,
   doc, collection, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot,
-  query, where, writeBatch, serverTimestamp, deleteField, increment, arrayUnion,
+  writeBatch, serverTimestamp, deleteField, increment, arrayUnion,
 } from "./firebase.js";
 import {
   HOST_UID, TWITCH_CLIENT_ID, TWITCH_CHANNEL, MIN_PLAYERS, MAX_PLAYERS,
@@ -12,11 +12,12 @@ import {
 import { validateToken, getTwitchUser, revokeToken, accountAgeDays } from "./twitch.js";
 import { embedUrl } from "./tracks.js";
 import { VoteCollector } from "./votes.js";
+import { findDuplicateGroups, burnPlan, burnedKeys } from "./originality.js";
 import { connectChat } from "./chat.js";
 import {
   PHASE, PHASE_LABEL, deckSize, shuffle, pickRandom, standings, leadersTie, DEFAULT_THEMES,
 } from "./game-logic.js";
-import { $, esc, patch, fmtCountdown, sourceLabel, podiumHTML } from "./ui.js";
+import { $, esc, patch, fmtCountdown, sourceLabel, podiumHTML, originalityHTML } from "./ui.js";
 
 const els = {
   auth: $("#auth"), control: $("#control"), stage: $("#stage"),
@@ -74,7 +75,7 @@ function subscribeGame(id) {
   render();
   if (!id) return;
   gameSubs.push(
-    onSnapshot(gref(), (s) => { S.game = s.data() ?? null; syncRound(); resumeVoting(); render(); }),
+    onSnapshot(gref(), (s) => { S.game = s.data() ?? null; syncRound(); resumeVoting(); onMovesChanged(); render(); }),
     onSnapshot(gcol("players"), (s) => {
       S.players = s.docs.map((d) => ({ uid: d.id, ...d.data() }));
       checkLastStanding();
@@ -169,7 +170,8 @@ const A = {
     const gameRef = doc(collection(db, "games"));
     await setDoc(gameRef, {
       phase: PHASE.LOBBY, round: 0, settings, themesLeft: themes, theme: null,
-      phaseEndsAt: null, nowPlaying: null, revealed: [], final: null, createdAt: serverTimestamp(),
+      phaseEndsAt: null, nowPlaying: null, revealed: [], final: null,
+      originality: null, burned: [], createdAt: serverTimestamp(),
     });
     await setDoc(doc(db, "meta", "active"), { gameId: gameRef.id });
     log("Лобі відкрито");
@@ -185,8 +187,6 @@ const A = {
     if (!p || !confirm(`Кікнути ${p.displayName}?`)) return;
     if (S.game.phase === PHASE.LOBBY) {
       const batch = writeBatch(db);
-      const tracks = await getDocs(query(gcol("tracks"), where("uid", "==", uid)));
-      tracks.forEach((t) => batch.delete(t.ref));
       batch.delete(gref("decks", uid));
       batch.delete(gref("players", uid));
       await batch.commit();
@@ -198,8 +198,50 @@ const A = {
 
   startGame: () => once("startGame", async () => {
     if (!canStart()) return;
-    await updateDoc(gref(), { phase: PHASE.SPIN, round: 1, theme: null });
-    log("Гра почалась");
+    const decks = await Promise.all(activePlayers().map(async (p) => ({
+      uid: p.uid, displayName: p.displayName,
+      cards: (await getDoc(gref("decks", p.uid))).data()?.cards ?? [],
+    })));
+    const groups = findDuplicateGroups(decks);
+    if (!groups.length) {
+      await updateDoc(gref(), { phase: PHASE.SPIN, round: 1, theme: null, originality: null });
+      log("Гра почалась: усі треки оригінальні");
+      return;
+    }
+    await updateDoc(gref(), { phase: PHASE.ORIGINALITY, originality: { groups } });
+    const exact = groups.filter((g) => g.type === "exact").length;
+    log(`Неоригінальні: ${exact} точних збігів, ${groups.length - exact} підозрілих`);
+  }),
+
+  /** arg = "<id групи>|burn" або "<id групи>|keep" */
+  decide: (arg) => once("decide", async () => {
+    const cut = arg.lastIndexOf("|");
+    const id = arg.slice(0, cut);
+    const decision = arg.slice(cut + 1);
+    const groups = (S.game.originality?.groups ?? []).map((g) =>
+      g.id === id && g.type === "title" ? { ...g, decision } : g);
+    await updateDoc(gref(), { originality: { groups } });
+  }),
+
+  applyOriginality: () => once("applyOriginality", async () => {
+    const groups = S.game.originality?.groups ?? [];
+    if (groups.some((g) => g.decision === null)) return;
+    const plan = burnPlan(groups);
+    const batch = writeBatch(db);
+    for (const [uid, keys] of plan) {
+      const deckRef = gref("decks", uid);
+      const cards = (await getDoc(deckRef)).data()?.cards ?? [];
+      for (const c of cards) if (keys.has(c.key)) { c.used = true; c.burned = true; }
+      batch.set(deckRef, { cards });
+      batch.update(gref("players", uid), { cardCount: cards.filter((c) => !c.used).length });
+    }
+    batch.update(gref(), {
+      phase: PHASE.SPIN, round: 1, theme: null,
+      burned: [...new Set([...(S.game.burned ?? []), ...burnedKeys(groups)])],
+    });
+    await batch.commit();
+    const total = [...plan.values()].reduce((n, k) => n + k.size, 0);
+    log(`Згоріло карт: ${total}. Гра почалась`);
   }),
 
   // TODO: горизонтальна карусель тем, як на сторінці фільмів. Результат уже обрано тут.
@@ -254,13 +296,16 @@ function canStart() {
   return ps.length >= MIN_PLAYERS && ps.every((p) => p.ready && p.cardCount === need);
 }
 
+/** Без карт у руці гравець пасує автоматично і лишається за столом. */
+const hasCards = (p) => (p.cardCount ?? 0) > 0;
+
 function onMovesChanged() {
   if (S.game?.phase !== PHASE.DISCARD) return;
   const thrown = S.moves.map((m) => m.uid);
   if (S.round && (S.round.thrown ?? []).length !== thrown.length) {
     updateDoc(gref("rounds", String(S.game.round)), { thrown }).catch(() => {});
   }
-  const waiting = activePlayers().filter((p) => !thrown.includes(p.uid));
+  const waiting = activePlayers().filter((p) => hasCards(p) && !thrown.includes(p.uid));
   if (!waiting.length && activePlayers().length) A.closeDiscard();
 }
 
@@ -274,14 +319,15 @@ async function closeDiscard() {
 
   for (const p of activePlayers()) {
     const move = moves.get(p.uid);
+    const deckRef = gref("decks", p.uid);
+    const cards = (await getDoc(deckRef)).data()?.cards ?? [];
     if (!move) {
+      if (!cards.some((c) => !c.used)) { stillIn++; log(`${p.displayName}: карт немає, автоматичний пас`); continue; }
       batch.update(gref("players", p.uid), { status: "out" });
       log(`${p.displayName} не встиг і вибуває`);
       continue;
     }
     stillIn++;
-    const deckRef = gref("decks", p.uid);
-    const cards = (await getDoc(deckRef)).data()?.cards ?? [];
     const card = cards.find((c) => c.key === move.cardKey && !c.used);
     if (!card) continue; // невалідна карта: 0 балів, нічого не згорає
     card.used = true;
@@ -475,6 +521,19 @@ function viewControl() {
         ${b("startGame", "Почати гру", { primary: true, disabled: !canStart() })}`;
       break;
     }
+    case PHASE.ORIGINALITY: {
+      const groups = g.originality?.groups ?? [];
+      const pending = groups.filter((x) => x.decision === null).length;
+      const rows = groups.filter((x) => x.type === "title").map((x) => `<div class="decide">
+          <div class="small">${x.cards.map((c) => `<div>${esc(c.displayName)}: <a class="link" href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.title)}</a></div>`).join("")}</div>
+          <div class="row">
+            <button class="btn ${x.decision === "burn" ? "primary" : ""}" data-action="decide" data-arg="${esc(x.id)}|burn">Однакові, палимо</button>
+            <button class="btn ${x.decision === "keep" ? "primary" : ""}" data-action="decide" data-arg="${esc(x.id)}|keep">Різні</button>
+          </div></div>`).join("");
+      body = `<p class="muted">Точні збіги горять автоматично.${rows ? " Схожі назви вирішуєш ти:" : ""}</p>${rows}
+        ${b("applyOriginality", pending ? `Ще ${pending} на рішення` : "Спалити і почати гру", { primary: true, disabled: pending > 0 })}`;
+      break;
+    }
     case PHASE.SHOP:
       body = `<p class="muted">Магазин ще в розробці.</p>${b("toSpin", "До колеса", { primary: true })}`;
       break;
@@ -482,7 +541,7 @@ function viewControl() {
       body = `<p class="muted">Тем лишилось: ${(g.themesLeft ?? []).length}</p>${b("spin", "Крутити колесо", { primary: true })}`;
       break;
     case PHASE.DISCARD:
-      body = `<p class="muted">Скинули: ${S.moves.length} / ${activePlayers().length}</p>${b("closeDiscard", "Завершити скидання зараз")}`;
+      body = `<p class="muted">Скинули: ${S.moves.length} / ${activePlayers().filter(hasCards).length}</p>${b("closeDiscard", "Завершити скидання зараз")}`;
       break;
     case PHASE.LISTEN:
       body = `<div class="row">${plays.map((p) => b("play", `№${p.slot}`, { arg: p.slot, primary: g.nowPlaying === p.slot })).join("")}</div>
@@ -510,6 +569,7 @@ function viewStage() {
   if (!S.game) return `<div class="stage-empty"><h1 class="logo big">echo<span>_</span>project</h1></div>`;
   const g = S.game;
   if (g.phase === PHASE.FINAL) return `<div class="stage-final">${podiumHTML(g.final)}</div>`;
+  if (g.phase === PHASE.ORIGINALITY) return originalityHTML(g.originality?.groups);
   const plays = S.round?.plays ?? [];
   const revealed = new Set(g.revealed ?? []);
   const cards = plays.map((p) => {

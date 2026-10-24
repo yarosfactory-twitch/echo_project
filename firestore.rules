@@ -48,16 +48,6 @@ service cloud.firestore {
         allow write: if isHost() || (isSelf(uid) && game(g).phase == 'lobby');
       }
 
-      // Реєстр треків гри для перевірки дублікатів. Документ можна лише створити:
-      // якщо трек уже взяв хтось інший, запис буде відхилено.
-      match /tracks/{key} {
-        allow read: if isHost();
-        allow create: if isActivePlayer(g) && game(g).phase == 'lobby'
-          && request.resource.data.keys().hasOnly(['uid'])
-          && request.resource.data.uid == request.auth.uid;
-        allow delete: if isHost() || (signedIn() && resource.data.uid == request.auth.uid);
-      }
-
       // Раунд публічний, але автори в ньому з'являються лише після голосування.
       match /rounds/{n} {
         allow read: if true;

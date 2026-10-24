@@ -6,7 +6,7 @@ import { startLogin, consumeRedirect } from "./twitch.js";
 import { resolveTrack, TrackError } from "./tracks.js";
 import { PHASE, PHASE_LABEL, deckSize } from "./game-logic.js";
 import { MAX_PLAYERS } from "./config.js";
-import { $, esc, patch, fmtCountdown, sourceLabel, fanHTML, podiumHTML } from "./ui.js";
+import { $, esc, patch, fmtCountdown, sourceLabel, fanHTML, podiumHTML, originalityHTML } from "./ui.js";
 
 const els = { me: $("#me"), status: $("#status"), main: $("#main"), table: $("#table") };
 
@@ -89,7 +89,6 @@ const actions = {
   join: () => startLogin(),
   async removeCard(key) {
     const cards = S.deck.filter((c) => c.key !== key);
-    await deleteDoc(gref("tracks", key)).catch(() => {});
     await setDoc(gref("decks", S.uid), { cards });
     await updateDoc(gref("players", S.uid), { cardCount: cards.length, ready: false });
   },
@@ -119,12 +118,9 @@ async function addCard(url) {
   try {
     const track = await resolveTrack(url);
     if (S.deck.some((c) => c.key === track.key)) throw new TrackError("Цей трек уже є у твоїй колоді");
-    try {
-      // Документ tracks/{key} можна лише створити. Якщо він уже є, правила відмовлять.
-      await setDoc(gref("tracks", track.key), { uid: S.uid });
-    } catch {
-      throw new TrackError("Цей трек уже є в колоді іншого гравця");
-    }
+    // Збіги з іншими гравцями тут не перевіряємо: про них дізнаються на старті гри.
+    // Треки, які вже згоріли як неоригінальні, додати знову не можна.
+    if ((S.game.burned ?? []).includes(track.key)) throw new TrackError("Цей трек уже згорів у цій грі як неоригінальний");
     const cards = [...S.deck, { ...track, used: false }];
     await setDoc(gref("decks", S.uid), { cards });
     await updateDoc(gref("players", S.uid), { cardCount: cards.length, ready: false });
@@ -174,6 +170,7 @@ function viewMain() {
   }
   switch (S.game.phase) {
     case PHASE.LOBBY: return viewDeckBuilder();
+    case PHASE.ORIGINALITY: return `<section class="panel">${originalityHTML(S.game.originality?.groups)}</section>`;
     case PHASE.DISCARD: return viewHand();
     case PHASE.LISTEN: case PHASE.VOTE: case PHASE.RESULTS: return viewRound();
     case PHASE.FINAL: return viewFinal();
@@ -216,6 +213,7 @@ function viewDeckBuilder() {
   return `<section class="panel">
     <h2>Твоя колода <span class="muted">${deck.length} / ${need}</span></h2>
     <p class="muted">Теми невідомі заздалегідь, тож бери різні треки. YouTube або SoundCloud.</p>
+    <p class="muted small">Якщо такий самий трек принесе ще хтось, на старті гри він згорить в обох. Ризикуєш, коли береш очевидні хіти.</p>
     <form id="add-form" class="add">
       <input id="track-url" type="url" placeholder="Посилання на трек" ${full || S.busy ? "disabled" : ""} autocomplete="off">
       <button class="btn" ${full || S.busy ? "disabled" : ""}>${S.busy ? "Перевіряю…" : "Додати"}</button>
@@ -233,6 +231,10 @@ function viewHand() {
     return `<section class="panel center"><h2>${text}</h2><p class="muted">Чекаємо на інших гравців.</p></section>`;
   }
   const hand = (S.deck ?? []).filter((c) => !c.used);
+  if (!hand.length) {
+    return `<section class="panel center"><h2>Карт не лишилось</h2>
+      <p class="muted">Ти автоматично пасуєш у цьому раунді й лишаєшся за столом.</p>${surrenderBtn()}</section>`;
+  }
   const cards = hand.map((c) => `<li class="sleeve face pick ${S.selected === c.key ? "selected" : ""}" data-action="select" data-arg="${esc(c.key)}">
       <span class="src">${sourceLabel(c.source)}</span><span class="title">${esc(c.title)}</span></li>`).join("");
   return `<section class="panel">

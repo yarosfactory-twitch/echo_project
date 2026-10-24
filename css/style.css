@@ -244,3 +244,64 @@ summary { cursor: pointer; color: var(--muted); }
 @media (prefers-reduced-motion: reduce) {
   *, *::after { animation: none !important; transition: none !important; }
 }
+
+/* ── Неоригінальні треки ───────────────── */
+.originality { max-width: 1000px; margin: 0 auto; padding: 12px 0; }
+.dup-title {
+  font-size: clamp(2.2rem, 5vw, 4rem); text-align: center; color: var(--danger);
+  text-shadow: 0 0 24px rgba(226, 115, 90, .45); animation: shake .5s ease-out;
+}
+.center { text-align: center; }
+.dup-group { margin: 18px 0; }
+.dup-label { text-transform: uppercase; letter-spacing: .1em; font-size: .8rem; color: var(--brass); margin-bottom: 4px; }
+.dup-group.title .dup-label { color: var(--muted); }
+.dup-cards { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); margin-top: 6px; }
+.sleeve.pending { outline: 2px dashed var(--brass); outline-offset: 3px; }
+.sleeve.kept { box-shadow: 0 0 0 2px var(--ok), 0 6px 14px rgba(0,0,0,.45); }
+
+/* Згоряння: карта жовтіє, полум'я піднімається знизу, лишається обвуглена. */
+.sleeve.burning { animation: char 1.6s ease-in var(--d, 0s) forwards; }
+.sleeve.burning > span:not(.stamp), .sleeve.burning::after { animation: char-ink 1.6s ease-in var(--d, 0s) forwards; }
+.sleeve.burning::before {
+  content: ""; position: absolute; inset: 0; z-index: 3; pointer-events: none;
+  background:
+    radial-gradient(120% 60% at 50% 110%, rgba(255, 200, 80, .95), rgba(255, 90, 20, .85) 35%, rgba(120, 20, 0, .6) 55%, transparent 70%);
+  transform: translateY(100%); mix-blend-mode: screen;
+  animation: flame 1.6s ease-in var(--d, 0s) forwards;
+}
+.sleeve.burning .stamp {
+  position: absolute; inset: auto 0 45% 0; z-index: 4; text-align: center;
+  font-family: var(--serif); font-weight: 800; font-size: 1.05rem; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--danger); background: rgba(0,0,0,.65); transform: rotate(-12deg) scale(0); padding: 4px 0;
+  border-top: 2px solid var(--danger); border-bottom: 2px solid var(--danger);
+  animation: stamp .35s cubic-bezier(.2, 1.6, .4, 1) calc(var(--d, 0s) + 1.3s) forwards;
+}
+@keyframes flame {
+  0% { transform: translateY(100%); opacity: 1; }
+  60% { transform: translateY(0); opacity: 1; }
+  100% { transform: translateY(-30%); opacity: 0; }
+}
+/* Тло обвуглюється внутрішньою тінню (під вмістом), тож штамп лишається яскравим. */
+@keyframes char {
+  0% { box-shadow: inset 0 0 0 999px rgba(255, 140, 40, 0), 0 6px 14px rgba(0,0,0,.45); }
+  45% { box-shadow: inset 0 0 0 999px rgba(255, 140, 40, .35), 0 0 26px rgba(255, 120, 30, .6); }
+  100% { box-shadow: inset 0 0 0 999px rgba(12, 8, 6, .82), 0 6px 14px rgba(0,0,0,.45); transform: scale(.94) rotate(-2deg); }
+}
+@keyframes char-ink {
+  45% { filter: sepia(1) saturate(2.5) brightness(1.2); }
+  100% { filter: grayscale(1) brightness(.5); opacity: .55; }
+}
+@keyframes stamp { to { transform: rotate(-12deg) scale(1); } }
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-8px); } 40% { transform: translateX(8px); }
+  60% { transform: translateX(-4px); } 80% { transform: translateX(4px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sleeve.burning { box-shadow: inset 0 0 0 999px rgba(12, 8, 6, .82); }
+  .sleeve.burning > span:not(.stamp) { opacity: .55; }
+  .sleeve.burning .stamp { transform: rotate(-12deg); }
+}
+
+.decide { padding: 10px 0; border-bottom: 1px solid rgba(212,169,74,.15); }
+.decide .row { margin: 6px 0 0; }

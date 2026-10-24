@@ -2,6 +2,7 @@
 
 export const PHASE = {
   LOBBY: "lobby",       // збір колод
+  ORIGINALITY: "originality", // перевірка на оригінальність перед 1-м раундом
   SHOP: "shop",         // магазин перед колесом (з 2-го раунду)
   SPIN: "spin",         // колесо обирає тему
   DISCARD: "discard",   // гравці скидають карту або пасують
@@ -14,6 +15,7 @@ export const PHASE = {
 
 export const PHASE_LABEL = {
   lobby: "Лобі: збираємо колоди",
+  originality: "Перевірка на оригінальність",
   shop: "Магазин",
   spin: "Колесо тем",
   discard: "Скидаємо карти",

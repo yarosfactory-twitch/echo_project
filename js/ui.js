@@ -46,3 +46,21 @@ export function podiumHTML(final) {
   return `<div class="podium">${step(second, "second")}${step(first, "first")}${step(third, "third")}</div>
     ${rest ? `<ol class="rest">${rest}</ol>` : ""}`;
 }
+
+/** Подія «Неоригінально!»: групи однакових треків і що з ними сталося. */
+export function originalityHTML(groups = []) {
+  if (!groups.length) return "";
+  const block = (g) => {
+    const state = g.decision === "burn" ? "burning" : g.decision === "keep" ? "kept" : "pending";
+    const label = g.type === "exact"
+      ? "Той самий трек"
+      : g.decision === "burn" ? "Ведучий: однакові" : g.decision === "keep" ? "Ведучий: різні, лишаються" : "Схожі назви · ведучий вирішує";
+    const cards = g.cards.map((c, i) => `<li class="sleeve face ${state}" style="--d:${i * 0.25}s">
+        <span class="src">${sourceLabel(c.source)}</span><span class="title">${esc(c.title)}</span>
+        <span class="author">${esc(c.displayName)}</span>
+        ${state === "burning" ? `<span class="stamp">неоригінально</span>` : ""}</li>`).join("");
+    return `<div class="dup-group ${g.type}"><div class="dup-label">${label}</div><ul class="deck dup-cards">${cards}</ul></div>`;
+  };
+  return `<div class="originality"><h2 class="dup-title">Неоригінально!</h2>
+    <p class="muted center">Однакові треки згоряють у всіх, у кого вони є</p>${groups.map(block).join("")}</div>`;
+}
