@@ -35,16 +35,24 @@ export function fanHTML(count, max = 10) {
   return `<div class="fan">${out}</div>`;
 }
 
-export function podiumHTML(final) {
+/** Підсумок гри: зверху ті, хто дійшов до кінця, нижче вибулі.
+ *  Обидва списки за балами (standings() уже сортує; переможець тай-брейку перший). */
+export function standingsHTML(final) {
   if (!final?.length) return "";
-  const [first, second, third] = final;
-  const step = (p, cls) => p
-    ? `<div class="step ${cls}"><div class="who">${esc(p.displayName)}</div><div class="pts">${p.score} б.</div><div class="block">${p.place}</div></div>`
-    : `<div class="step ${cls} empty"></div>`;
-  const rest = final.slice(3).map((p) =>
-    `<li><span>${p.place}. ${esc(p.displayName)}${p.status === "out" ? " · вибув" : ""}</span><span>${p.score} б.</span></li>`).join("");
-  return `<div class="podium">${step(second, "second")}${step(first, "first")}${step(third, "third")}</div>
-    ${rest ? `<ol class="rest">${rest}</ol>` : ""}`;
+  const byScore = (a, b) => (b.score ?? 0) - (a.score ?? 0);
+  const finished = final.filter((p) => p.status !== "out");
+  const out = final.filter((p) => p.status === "out").sort(byScore);
+  const avatar = (p) => p.avatar
+    ? `<img class="avatar" src="${esc(p.avatar)}" alt="" loading="lazy">`
+    : `<span class="avatar empty">${esc((p.displayName || "?").slice(0, 1).toUpperCase())}</span>`;
+  const row = (p, place) => `<li class="${place === 1 ? "winner" : ""}">
+      ${place ? `<span class="place">${place}</span>` : ""}${avatar(p)}
+      <span class="who">${esc(p.displayName)}</span>
+      <span class="pts">${plural(p.score ?? 0, POINTS)}</span></li>`;
+  return `<div class="standings">
+    ${finished.length ? `<ol class="standings-list">${finished.map((p, i) => row(p, i + 1)).join("")}</ol>` : ""}
+    ${out.length ? `<h3 class="standings-title">Вибули з гри</h3><ul class="standings-list out">${out.map((p) => row(p, 0)).join("")}</ul>` : ""}
+  </div>`;
 }
 
 /** Подія «Неоригінально!»: групи однакових треків і що з ними сталося. */
@@ -72,3 +80,4 @@ export function plural(n, [one, few, many]) {
   return `${n} ${word}`;
 }
 export const CARDS = ["карта", "карти", "карт"];
+export const POINTS = ["бал", "бали", "балів"];

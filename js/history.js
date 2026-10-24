@@ -1,6 +1,6 @@
 // Сторінка «Історія ігор» (history.html). Лише зіграні карти.
 import { db, collection, getDocs, query, orderBy, limit } from "./firebase.js";
-import { $, esc, sourceLabel, podiumHTML } from "./ui.js";
+import { $, esc, sourceLabel, standingsHTML } from "./ui.js";
 
 const list = $("#history");
 
@@ -22,7 +22,7 @@ function gameHTML(g) {
   }).join("");
   return `<article class="panel game">
     <header><h2>${esc(date)}</h2><span class="muted">${g.players?.length ?? 0} гравців</span></header>
-    ${podiumHTML(g.players)}
+    ${standingsHTML(g.players)}
     <details><summary>Треки по раундах</summary>${rounds}</details>
   </article>`;
 }

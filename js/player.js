@@ -7,7 +7,7 @@ import { resolveTrack, TrackError, formatTimecode } from "./tracks.js";
 import { PHASE, PHASE_LABEL, deckSize } from "./game-logic.js";
 import { MAX_PLAYERS } from "./config.js";
 import { Reel } from "./reel.js";
-import { $, esc, patch, fmtCountdown, sourceLabel, fanHTML, podiumHTML, originalityHTML, plural, CARDS } from "./ui.js";
+import { $, esc, patch, fmtCountdown, sourceLabel, fanHTML, standingsHTML, originalityHTML, plural, CARDS } from "./ui.js";
 
 const els = { me: $("#me"), status: $("#status"), main: $("#main"), table: $("#table") };
 
@@ -297,7 +297,7 @@ function viewRound() {
 }
 
 function viewFinal() {
-  return `<section class="panel center"><h2>Фінал</h2>${podiumHTML(S.game.final)}
+  return `<section class="panel center"><h2>Фінал</h2>${standingsHTML(S.game.final)}
     <p><a class="link" href="history.html">Історія ігор</a></p></section>`;
 }
 

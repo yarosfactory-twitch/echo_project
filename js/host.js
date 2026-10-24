@@ -18,7 +18,7 @@ import { Reel, SPIN_MS } from "./reel.js";
 import {
   PHASE, PHASE_LABEL, MODE_LABEL, deckSize, shuffle, pickRandom, standings, leadersTie, DEFAULT_THEMES,
 } from "./game-logic.js";
-import { $, esc, patch, fmtCountdown, sourceLabel, podiumHTML, originalityHTML, plural, CARDS } from "./ui.js";
+import { $, esc, patch, fmtCountdown, sourceLabel, standingsHTML, originalityHTML, plural, CARDS } from "./ui.js";
 
 const els = {
   auth: $("#auth"), control: $("#control"), stage: $("#stage"), reel: $("#reel"), top: $("#top-stage"),
@@ -765,7 +765,7 @@ function viewControl() {
 function viewStage() {
   if (!S.game) return `<div class="stage-empty"><img class="logo-big" src="img/logo.png" alt="Music Roulette"></div>`;
   const g = S.game;
-  if (g.phase === PHASE.FINAL) return `<div class="stage-final">${podiumHTML(g.final)}</div>`;
+  if (g.phase === PHASE.FINAL) return `<div class="stage-final"><h1 class="final-title">Фінал</h1>${standingsHTML(g.final)}</div>`;
   if (g.phase === PHASE.ORIGINALITY) return originalityHTML(g.originality?.groups);
   const plays = S.round?.plays ?? [];
   const revealed = new Set(g.revealed ?? []);

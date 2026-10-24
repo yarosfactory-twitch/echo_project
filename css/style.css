@@ -195,21 +195,7 @@ summary { cursor: pointer; color: var(--muted); }
 .fan .sleeve { position: absolute; left: 35px; bottom: 0; width: 40px; padding: 0; transform-origin: 50% 140%; transform: rotate(var(--r)); }
 
 /* ── П'єдестал ─────────────────────────── */
-.podium { display: flex; justify-content: center; align-items: flex-end; gap: 10px; margin: 20px 0; }
-.step { width: 30%; max-width: 180px; text-align: center; }
-.step .who { font-family: var(--serif); font-size: 1.15rem; font-weight: 600; overflow-wrap: anywhere; }
-.step .pts { color: var(--muted); font-size: .9rem; margin-bottom: 6px; }
-.step .block {
-  font-family: var(--serif); font-size: 2.4rem; font-weight: 800; color: var(--ink);
-  background: linear-gradient(var(--brass), var(--brass-dim)); border-radius: 6px 6px 0 0;
-  display: flex; align-items: center; justify-content: center;
-}
-.step.first .block { height: 150px; }
-.step.second .block { height: 105px; background: linear-gradient(#d9d9d9, #8f8f8f); }
-.step.third .block { height: 75px; background: linear-gradient(#c98a5a, #7a4a2a); }
-.step.empty { visibility: hidden; }
-.rest { list-style: none; padding: 0; max-width: 420px; margin: 0 auto; }
-.rest li, .seats li, .plays-list li { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px solid rgba(212,169,74,.15); }
+.seats li, .plays-list li { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px solid rgba(212,169,74,.15); }
 
 /* ── Ведучий ───────────────────────────── */
 .host-layout { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 20px; max-width: 1600px; }
@@ -410,3 +396,25 @@ summary { cursor: pointer; color: var(--muted); }
 .volume label { display: flex; justify-content: space-between; margin: 0 0 6px; color: var(--muted); }
 .volume b { color: var(--brass); }
 .volume input[type=range] { width: 100%; padding: 0; border: 0; background: transparent; accent-color: var(--brass); }
+
+/* ── Підсумок гри ──────────────────────── */
+.standings { max-width: 560px; margin: 16px auto; text-align: left; }
+.standings-list { list-style: none; padding: 0; margin: 0; }
+.standings-list li {
+  display: flex; align-items: center; gap: 14px; padding: 10px 14px; margin-bottom: 8px;
+  background: rgba(0,0,0,.25); border: 1px solid rgba(212,169,74,.18); border-radius: 10px;
+}
+.standings-list .place { width: 1.6em; text-align: center; font-family: var(--serif); font-weight: 800; font-size: 1.3rem; color: var(--muted); }
+.standings-list .avatar { width: 44px; height: 44px; border-radius: 50%; object-fit: cover; flex: 0 0 auto; border: 2px solid rgba(212,169,74,.4); }
+.standings-list .avatar.empty { display: inline-flex; align-items: center; justify-content: center; background: var(--felt-2); color: var(--cream); font-weight: 700; }
+.standings-list .who { flex: 1; font-weight: 700; font-size: 1.1rem; overflow-wrap: anywhere; }
+.standings-list .pts { font-weight: 800; color: var(--brass); white-space: nowrap; }
+.standings-list li.winner { border-color: var(--brass); background: rgba(212,169,74,.12); box-shadow: 0 0 24px rgba(212,169,74,.2); }
+.standings-list li.winner .place { color: var(--brass); }
+.standings-list li.winner .avatar { width: 56px; height: 56px; border-color: var(--brass); }
+.standings-list li.winner .who { font-size: 1.3rem; }
+.standings-title { margin: 22px 0 10px; font-size: 1rem; color: var(--muted); text-transform: uppercase; letter-spacing: .1em; font-family: var(--sans); }
+.standings-list.out li { opacity: .6; }
+.stage-final .standings { max-width: 720px; }
+.stage-final .standings-list li { padding: 14px 18px; }
+.final-title { text-align: center; font-size: clamp(2rem, 4vw, 3.2rem); color: var(--brass); margin: 0 0 8px; }
