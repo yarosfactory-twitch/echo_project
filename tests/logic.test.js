@@ -149,3 +149,19 @@ test("Голос із сайту: за свій не можна, останні�
   c.handleSlot("Bob", 1);             // передумав на сайті
   assert.deepEqual(c.tally(), { 1: 1, 2: 0, 3: 1 });
 });
+
+import { freshThemes } from "../js/game-logic.js";
+test("Теми з останніх ігор не потрапляють у барабан, якщо пулу вистачає", () => {
+  const pool = ["a", "b", "c", "d", "e", "f"];
+  assert.deepEqual(freshThemes(pool, ["a", "b"], 2), ["c", "d", "e", "f"]);
+  assert.deepEqual(freshThemes(pool, ["a", "b", "c"], 2), pool, "лишилось би 3 < 2 + 2 — беремо весь пул");
+});
+
+test("Голоси зберігаються і відновлюються після перезавантаження", () => {
+  const c = new VoteCollector({ trackCount: 2, slotAuthors: {}, bots: [] });
+  c.open = true; c.handle("a", "1"); c.handle("b", "2");
+  const d = new VoteCollector({ trackCount: 2, slotAuthors: {}, bots: [] });
+  d.load(JSON.parse(JSON.stringify(c.toJSON())));
+  d.load({ junk: 9 });
+  assert.deepEqual(d.tally(), { 1: 1, 2: 1 });
+});

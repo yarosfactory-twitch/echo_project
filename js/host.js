@@ -3,7 +3,7 @@
 import {
   db, waitForUser, signInHost, signOut, auth,
   doc, collection, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot,
-  query, where, writeBatch, serverTimestamp, deleteField, increment, arrayUnion,
+  query, where, orderBy, limit, writeBatch, serverTimestamp, deleteField, increment, arrayUnion,
 } from "./firebase.js";
 import {
   HOST_UID, TWITCH_CLIENT_ID, TWITCH_CHANNEL, MIN_PLAYERS, MAX_PLAYERS,
@@ -16,9 +16,9 @@ import { findDuplicateGroups, burnPlan, burnedKeys } from "./originality.js";
 import { connectChat } from "./chat.js";
 import { Reel, SPIN_MS } from "./reel.js";
 import {
-  PHASE, PHASE_LABEL, MODE_LABEL, deckSize, shuffle, pickRandom, standings, leadersTie, DEFAULT_THEMES,
+  PHASE, PHASE_LABEL, MODE_LABEL, deckSize, freshThemes, shuffle, pickRandom, standings, leadersTie, DEFAULT_THEMES,
 } from "./game-logic.js";
-import { $, esc, patch, fmtCountdown, sourceLabel, standingsHTML, originalityHTML, tableHTML, plural, CARDS } from "./ui.js";
+import { $, esc, patch, fmtCountdown, sourceLabel, standingsHTML, originalityHTML, tableHTML, flipClass, plural, CARDS } from "./ui.js";
 
 const els = {
   auth: $("#auth"), control: $("#control"), stage: $("#stage"), reel: $("#reel"), top: $("#top-stage"),
@@ -44,6 +44,7 @@ let volume = 50; // гучність треків, 0–100
 try { volume = Math.min(100, Math.max(0, Number(localStorage.getItem("mr_volume") ?? 50))); } catch { /* типове 50 */ }
 let currentSc = null; // віджет SoundCloud поточного треку
 let appliedSiteVotes = new Map(); // голоси гравців із сайту, уже враховані: uid → підпис
+let votesDirty = false; // є незбережені голоси
 const reel = new Reel(els.reel, { sound: true }); // звук обертання йде лише зі сторінки ведучого
 let landedSpin = null; // id обертання, яке вже зупинилось (до цього тему не показуємо)
 let gameSubs = [];
@@ -142,7 +143,7 @@ function applySiteVotes() {
     const login = S.players.find((p) => p.uid === v.uid)?.login;
     if (S.collector.handleSlot(login, v.slot)) changed = true;
   }
-  if (changed) render();
+  if (changed) { votesDirty = true; render(); }
 }
 
 // ── Перевірка заявок (замість Cloud Function) ───────────────
@@ -230,7 +231,14 @@ const A = {
       voteSeconds: num(f.voteSeconds, 10, 600),
       mode: f.mode === "hardcore" ? "hardcore" : "classic",
     };
-    const themes = [...new Set([...(S.themesPool ?? DEFAULT_THEMES), ...lines(f.custom)])];
+    // Теми останніх 3 ігор не кладемо в барабан, поки пулу вистачає.
+    let recent = [];
+    try {
+      const last = await getDocs(query(collection(db, "history"), orderBy("finishedAt", "desc"), limit(3)));
+      recent = last.docs.flatMap((d) => (d.data().rounds ?? []).map((r) => r.theme));
+    } catch { /* історії ще немає — не страшно */ }
+    const pool = freshThemes(S.themesPool ?? DEFAULT_THEMES, recent, settings.rounds);
+    const themes = [...new Set([...pool, ...lines(f.custom)])];
     const gameRef = doc(collection(db, "games"));
     await setDoc(gameRef, {
       phase: PHASE.LOBBY, round: 0, settings, themesLeft: themes, theme: null,
@@ -472,6 +480,9 @@ function ensureCollector() {
       slotAuthors: Object.fromEntries(secret.slots.map((s) => [s.slot, s.login])),
       bots: CHAT_BOTS,
     });
+    // Голоси, збережені до перезавантаження сторінки ведучого.
+    const saved = (await getDoc(gref("secret", `votes_${S.game.round}`))).data()?.votes;
+    if (saved) S.collector.load(saved);
   })().finally(() => { collectorLoading = null; });
   return collectorLoading;
 }
@@ -485,12 +496,19 @@ function resumeVoting() {
 }
 
 function onChatMessage(login, message) {
-  if (S.collector?.handle(login, message)) render();
+  if (S.collector?.handle(login, message)) { votesDirty = true; render(); }
 }
+
+// Кожні 2 с зберігаємо голоси в базу, щоб перезавантаження сторінки їх не стерло.
+setInterval(() => {
+  if (!votesDirty || S.game?.phase !== PHASE.VOTE || !S.collector) return;
+  votesDirty = false;
+  setDoc(gref("secret", `votes_${S.game.round}`), { votes: S.collector.toJSON() }).catch(() => { votesDirty = true; });
+}, 2000);
 
 async function closeVote() {
   if (S.game.phase !== PHASE.VOTE) return;
-  await ensureCollector(); // після перезавантаження голоси до нього втрачені
+  await ensureCollector(); // після перезавантаження голоси відновлюються з бази
   S.collector.open = false;
   const counts = S.collector.tally();
   const batch = writeBatch(db);
@@ -803,7 +821,8 @@ function viewStage() {
     const open = revealed.has(p.slot) || S.round.revealed;
     const author = S.round.revealed ? `<span class="author">${esc(p.displayName)} · ${p.votes} гол.</span>` : "";
     const click = clickable ? ` data-action="play" data-arg="${p.slot}" title="Увімкнути трек №${p.slot}"` : "";
-    return `<li class="sleeve ${open ? "face" : "back"}${g.nowPlaying === p.slot ? " playing" : ""}${clickable ? " clickable" : ""}"${click}><span class="num">${p.slot}</span>
+    const flip = open ? flipClass(`${S.gameId}-${g.round}-${p.slot}`) : "";
+    return `<li class="sleeve ${open ? "face" : "back"}${flip}${g.nowPlaying === p.slot ? " playing" : ""}${clickable ? " clickable" : ""}"${click}><span class="num">${p.slot}</span>
       ${open ? `<span class="src">${sourceLabel(p.source)}</span><span class="title">${esc(p.title)}</span>` : ""}${author}</li>`;
   }).join("");
   const voteInfo = g.phase === PHASE.VOTE

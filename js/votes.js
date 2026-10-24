@@ -56,6 +56,17 @@ export class VoteCollector {
 
   get voterCount() { return this.votes.size; }
 
+  /** Знімок голосів для збереження в базі: { login: slot }. */
+  toJSON() { return Object.fromEntries(this.votes); }
+
+  /** Відновлення після перезавантаження сторінки ведучого. */
+  load(saved = {}) {
+    for (const [login, slot] of Object.entries(saved)) {
+      const n = Number(slot);
+      if (Number.isInteger(n) && n >= 1 && n <= this.trackCount) this.votes.set(login, n);
+    }
+  }
+
   /** → { [slot]: кількість голосів } для всіх треків, включно з нулями */
   tally() {
     const result = {};

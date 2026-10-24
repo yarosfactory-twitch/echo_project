@@ -7,7 +7,7 @@ import { resolveTrack, TrackError, formatTimecode } from "./tracks.js";
 import { PHASE, PHASE_LABEL, deckSize } from "./game-logic.js";
 import { MAX_PLAYERS } from "./config.js";
 import { Reel } from "./reel.js";
-import { $, esc, patch, fmtCountdown, sourceLabel, tableHTML, standingsHTML, originalityHTML } from "./ui.js";
+import { $, esc, patch, fmtCountdown, sourceLabel, tableHTML, standingsHTML, originalityHTML, flipClass } from "./ui.js";
 
 const els = { me: $("#me"), status: $("#status"), main: $("#main"), table: $("#table") };
 
@@ -312,7 +312,8 @@ function viewRound() {
     const chosen = voting && S.myVote === p.slot;
     const click = voting && !mine ? ` data-action="vote" data-arg="${p.slot}" title="Проголосувати за №${p.slot}"` : "";
     const badge = mine ? `<span class="vote-badge mine">твій трек</span>` : chosen ? `<span class="vote-badge">твій голос</span>` : "";
-    return `<li class="sleeve ${open ? "face" : "back"}${playing}${click ? " votable" : ""}${chosen ? " voted" : ""}${mine ? " mine" : ""}"${click}><span class="num">${p.slot}</span>
+    const flip = open ? flipClass(`${S.gameId}-${S.game.round}-${p.slot}`) : "";
+    return `<li class="sleeve ${open ? "face" : "back"}${flip}${playing}${click ? " votable" : ""}${chosen ? " voted" : ""}${mine ? " mine" : ""}"${click}><span class="num">${p.slot}</span>
       ${open ? `<span class="title">${esc(p.title)}</span>` : ""}${author}${badge}</li>`;
   }).join("");
   const hint = S.game.phase !== PHASE.VOTE ? ""

@@ -107,3 +107,13 @@ export function plural(n, [one, few, many]) {
 }
 export const CARDS = ["карта", "карти", "карт"];
 export const POINTS = ["бал", "бали", "балів"];
+
+// Переворот карти з сорочки на лицьовий бік: лише для щойно відкритої, один раз.
+// patch() перемальовує розмітку при кожній зміні (новий голос тощо), тож
+// пам'ятаємо, коли карту вперше побачили відкритою.
+const firstSeenOpen = new Map();
+export function flipClass(key) {
+  const now = Date.now();
+  if (!firstSeenOpen.has(key)) firstSeenOpen.set(key, now);
+  return now - firstSeenOpen.get(key) < 600 ? " flip" : "";
+}

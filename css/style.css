@@ -168,7 +168,7 @@ summary { cursor: pointer; color: var(--muted); }
 .sleeve.selected { transform: translateY(-8px); box-shadow: 0 0 0 3px var(--brass), 0 12px 24px rgba(0,0,0,.5); }
 .sleeve.playing { box-shadow: 0 0 0 3px var(--brass), 0 0 30px rgba(212,169,74,.5); }
 .sleeve.playing::after { animation: spin 3s linear infinite; }
-.plays .sleeve.face { animation: flip .5s ease-out; }
+.plays .sleeve.face.flip { animation: flip .5s ease-out; }
 
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes flip { from { transform: rotateY(90deg); } to { transform: rotateY(0); } }

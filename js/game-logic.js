@@ -18,7 +18,7 @@ export const PHASE_LABEL = {
   originality: "Перевірка на оригінальність",
   shop: "Магазин",
   spin: "Барабан тем",
-  discard: "Скидаємо карти",
+  discard: "Гравці обирайте карти",
   listen: "Слухаємо треки",
   vote: "Голосування",
   results: "Підсумки раунду",
@@ -82,6 +82,14 @@ export function lateJoinScore(players) {
 
 /** Ціна плюшки: відсоток від балів, вгору, мінімум 1. */
 export const shopPrice = (score, percent) => Math.max(1, Math.ceil((score * percent) / 100));
+
+/** Теми для нової гри без тих, що випадали в останніх іграх, якщо пулу вистачає:
+ *  лишаємо щонайменше rounds + 2 теми (запас на тай-брейк і повторне обертання). */
+export function freshThemes(pool, recent, rounds) {
+  const recentSet = new Set(recent);
+  const fresh = pool.filter((t) => !recentSet.has(t));
+  return fresh.length >= rounds + 2 ? fresh : pool;
+}
 
 export const DEFAULT_THEMES = [
   "Пісня для нічної дороги",
