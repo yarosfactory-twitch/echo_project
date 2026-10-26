@@ -21,7 +21,8 @@ import { itemById, priceOf, applyQueue, roundPoints, tiebreakOriginality, tiebre
 import {
   PHASE, PHASE_LABEL, MODE_LABEL, deckSize, freshThemes, roundsLeft, lateJoinOpen, lateJoinScore, cryptoRandom, shuffle, pickRandom, standings, leadersTie, DEFAULT_THEMES,
 } from "./game-logic.js";
-import { $, esc, patch, fmtCountdown, sourceLabel, standingsHTML, originalityHTML, tableHTML, flipAttr, plural, CARDS, POINTS } from "./ui.js";
+import { computeTitles, comebackPlayers } from "./titles.js";
+import { $, esc, patch, fmtCountdown, sourceLabel, standingsHTML, titlesHTML, originalityHTML, tableHTML, flipAttr, plural, CARDS, POINTS } from "./ui.js";
 
 const els = {
   auth: $("#auth"), control: $("#control"), stage: $("#stage"), reel: $("#reel"), top: $("#top-stage"), wheel: $("#wheel"),
@@ -519,7 +520,12 @@ const A = {
     // у магазині, і коли готові всі — магазин закривається сам.
     const batch = writeBatch(db);
     for (const p of activePlayers()) batch.update(gref("players", p.uid), { ready: false });
+    // Камбек: хто на останньому місці — одна безкоштовна покупка (раз на гру).
+    const comeback = comebackPlayers(S.players);
+    for (const p of comeback) batch.update(gref("players", p.uid), { freeBuys: increment(1), comebackGot: true });
+    if (comeback.length) log(`🎁 Камбек: ${comeback.map((p) => p.displayName).join(", ")} — безкоштовна покупка`);
     batch.update(gref(), {
+      comeback: comeback.length ? { round: S.game.round + 1, names: comeback.map((p) => p.displayName) } : null,
       round: S.game.round + 1, phase: PHASE.SHOP, theme: null, nowPlaying: null, revealed: [], phaseEndsAt: null,
       mods: { round: S.game.round + 1, queue: [], double: [] },
     });
@@ -695,14 +701,28 @@ async function closeVote() {
   const batch = writeBatch(db);
   // «Подвійний раунд» з магазину множить бали за цей раунд на 2.
   const doubled = new Set(S.game.mods?.round === S.game.round ? S.game.mods.double ?? [] : []);
+  // Для титулів у фіналі: голоси саме від чату (не від гравців гри) і таблиця до/після раунду.
+  const playerLogins = new Set(S.players.map((p) => (p.login ?? "").toLowerCase()));
+  const chatCounts = {};
+  for (const [login, slot] of Object.entries(S.collector.toJSON())) {
+    if (!playerLogins.has(login)) chatCounts[slot] = (chatCounts[slot] ?? 0) + 1;
+  }
+  const seated = S.players.filter((p) => p.status === "active" || p.status === "out");
+  const scoresBefore = Object.fromEntries(seated.map((p) => [p.uid, p.score ?? 0]));
+  const scoresAfter = { ...scoresBefore };
+  const pointsBySlot = {};
   for (const s of S.secret.slots) {
-    batch.update(gref("players", s.uid), { score: increment(roundPoints(counts[s.slot], doubled.has(s.uid))) });
+    const pts = roundPoints(counts[s.slot], doubled.has(s.uid));
+    pointsBySlot[s.slot] = pts;
+    if (s.uid in scoresAfter) scoresAfter[s.uid] += pts;
+    batch.update(gref("players", s.uid), { score: increment(pts) });
   }
   const plays = (S.round?.plays ?? []).map((p) => {
     const s = S.secret.slots.find((x) => x.slot === p.slot);
-    return { ...p, uid: s?.uid ?? null, login: s?.login ?? "", displayName: s?.displayName ?? "?", votes: counts[p.slot] ?? 0 };
+    return { ...p, uid: s?.uid ?? null, login: s?.login ?? "", displayName: s?.displayName ?? "?", votes: counts[p.slot] ?? 0,
+      chatVotes: chatCounts[p.slot] ?? 0, points: pointsBySlot[p.slot] ?? 0 };
   });
-  batch.update(gref("rounds", String(S.game.round)), { plays, revealed: true, voters: S.collector.voterCount });
+  batch.update(gref("rounds", String(S.game.round)), { plays, revealed: true, voters: S.collector.voterCount, scoresBefore, scoresAfter });
   batch.update(gref(), { phase: PHASE.RESULTS, phaseEndsAt: null });
   await batch.commit();
   log(`Голосування закрито: ${S.collector.voterCount} голосів`);
@@ -895,7 +915,9 @@ async function handlePurchase(req) {
   if (!item) return reject("Невідома плюшка");
   // Актуальний рахунок: з бази, бо кілька покупок поспіль змінюють бали.
   const fresh = (await getDoc(gref("players", p.uid))).data() ?? p;
-  const price = priceOf(fresh.score ?? 0, g.settings.prices?.[item.pct] ?? 0);
+  // Камбек: безкоштовна покупка діє на першу ж покупку.
+  const free = (fresh.freeBuys ?? 0) > 0;
+  const price = free ? 0 : priceOf(fresh.score ?? 0, g.settings.prices?.[item.pct] ?? 0);
   if ((fresh.score ?? 0) < price) return reject(`Не вистачає балів: потрібно ${price}`);
 
   // Покупки обробляються одна за одною швидше, ніж приходить знімок гри, тож
@@ -932,13 +954,13 @@ async function handlePurchase(req) {
     batch.update(gref("players", p.uid), { cardCount: cards.filter((c) => !c.used).length });
     registryKey = g.settings.mode !== "hardcore" ? clean.key : null;
   }
-  batch.update(gref("players", p.uid), { score: increment(-price) });
-  batch.update(reqRef, { status: "ok", price });
+  batch.update(gref("players", p.uid), free ? { freeBuys: increment(-1) } : { score: increment(-price) });
+  batch.update(reqRef, { status: "ok", price, free });
   await batch.commit();
   // Класичний режим: трек у реєстр дублікатів. Окремо від покупки, щоб навіть
   // за старих правил бази (без дозволу ведучому) покупка не відкочувалась.
   if (registryKey) await setDoc(gref("tracks", registryKey), { uid: p.uid }).catch(() => {});
-  log(`🛒 ${p.displayName}: ${item.title} за ${plural(price, POINTS)}`);
+  log(`🛒 ${p.displayName}: ${item.title} ${free ? "безкоштовно (камбек)" : `за ${plural(price, POINTS)}`}`);
 }
 
 // ── Жетон повторного обертання ──────────────────────────────
@@ -997,13 +1019,17 @@ async function finalize(winnerUid) {
 
 async function writeFinal(winnerUid) {
   const final = standings(S.players, winnerUid);
-  const rounds = (await getDocs(gcol("rounds"))).docs
+  const raw = (await getDocs(gcol("rounds"))).docs
     .map((d) => ({ n: Number(d.id), ...d.data() }))
     .filter((r) => r.revealed)
-    .sort((a, b) => a.n - b.n)
-    .map((r) => ({ n: r.n, theme: r.theme, plays: r.plays.map(({ slot, source, url, title, displayName, login, votes }) => ({ slot, source, url, title, displayName, login, votes })) }));
-  await setDoc(doc(db, "history", S.gameId), { finishedAt: serverTimestamp(), players: final, rounds });
-  await updateDoc(gref(), { phase: PHASE.FINAL, final, phaseEndsAt: null, nowPlaying: null, finalAt: Date.now() });
+    .sort((a, b) => a.n - b.n);
+  // Титули — лише за звичайні раунди, тай-брейк не рахується.
+  const nameOf = (uid) => final.find((p) => p.uid === uid)?.displayName ?? "?";
+  const titles = computeTitles(raw.filter((r) => r.n <= S.game.settings.rounds))
+    .map((t) => ({ ...t, winners: t.winners.map((w) => ({ ...w, displayName: nameOf(w.uid) })) }));
+  const rounds = raw.map((r) => ({ n: r.n, theme: r.theme, plays: r.plays.map(({ slot, source, url, title, displayName, login, votes }) => ({ slot, source, url, title, displayName, login, votes })) }));
+  await setDoc(doc(db, "history", S.gameId), { finishedAt: serverTimestamp(), players: final, rounds, titles });
+  await updateDoc(gref(), { phase: PHASE.FINAL, final, titles, phaseEndsAt: null, nowPlaying: null, finalAt: Date.now() });
   log("Гру завершено");
 }
 
@@ -1282,7 +1308,7 @@ function viewControl() {
 function viewStage() {
   if (!S.game) return `<div class="stage-empty"><img class="logo-big" src="img/logo.png" alt="Music Roulette"></div>`;
   const g = S.game;
-  if (g.phase === PHASE.FINAL) return `<div class="stage-final"><h1 class="final-title">Фінал</h1>${standingsHTML(g.final)}</div>`;
+  if (g.phase === PHASE.FINAL) return `<div class="stage-final"><h1 class="final-title">Фінал</h1>${standingsHTML(g.final)}${titlesHTML(g.titles)}</div>`;
   if (g.phase === PHASE.ORIGINALITY) return originalityHTML(g.originality?.groups);
   if (g.phase === PHASE.SHOP) return shopStageHTML();
   if (g.phase === PHASE.TB_SUBMIT) return tbStageHTML();
@@ -1335,10 +1361,11 @@ function shopStageHTML() {
     const p = S.players.find((x) => x.uid === r.uid);
     const item = itemById(r.item);
     const extra = r.item === "queue" ? (r.arg === "last" ? " (останнім)" : " (першим)") : "";
-    return `<li><span class="who">${esc(p?.displayName ?? "?")}</span><span>${esc(item?.title ?? r.item)}${extra}</span><span class="pts">−${plural(r.price ?? 0, POINTS)}</span></li>`;
+    return `<li><span class="who">${esc(p?.displayName ?? "?")}</span><span>${esc(item?.title ?? r.item)}${extra}</span><span class="pts">${r.free ? "🎁 безкоштовно" : `−${plural(r.price ?? 0, POINTS)}`}</span></li>`;
   }).join("");
   return `<h1 class="final-title">Магазин</h1>
     <p class="hint">Бали — це і рахунок, і гроші. Купуй на сайті до обертання барабана</p>
+    ${S.game.comeback?.round === S.game.round ? `<p class="comeback">🎁 Камбек: ${esc(S.game.comeback.names.join(", "))} — безкоштовна покупка</p>` : ""}
     <ul class="shop-log">${rows || `<li class="muted">Поки ніхто нічого не купив</li>`}</ul>
     ${shopReadyHTML()}`;
 }

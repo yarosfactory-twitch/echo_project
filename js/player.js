@@ -11,7 +11,7 @@ import { Reel } from "./reel.js";
 import { fireConfetti } from "./confetti.js";
 import { VinylWheel } from "./wheel.js";
 import { SHOP_ITEMS, priceOf } from "./shop.js";
-import { $, esc, patch, fmtCountdown, sourceLabel, tableHTML, standingsHTML, originalityHTML, flipAttr, plural, POINTS } from "./ui.js";
+import { $, esc, patch, fmtCountdown, sourceLabel, tableHTML, standingsHTML, titlesHTML, originalityHTML, flipAttr, plural, POINTS } from "./ui.js";
 
 const els = { me: $("#me"), status: $("#status"), main: $("#main"), table: $("#table") };
 
@@ -499,7 +499,7 @@ function viewRound() {
 }
 
 function viewFinal() {
-  return `<section class="panel center"><h2>Фінал</h2>${standingsHTML(S.game.final)}
+  return `<section class="panel center"><h2>Фінал</h2>${standingsHTML(S.game.final)}${titlesHTML(S.game.titles)}
     <p><a class="link" href="history.html">Історія ігор</a></p></section>`;
 }
 
@@ -538,8 +538,9 @@ function viewShop() {
   const hasQueue = mine.some((r) => r.item === "queue" && r.status === "ok");
   const hand = (S.deck ?? []).filter((c) => !c.used);
   const d = S.draft;
+  const free = (me.freeBuys ?? 0) > 0; // камбек: перша покупка безкоштовна
   const cards = SHOP_ITEMS.map((item) => {
-    const price = priceOf(score, prices[item.pct]);
+    const price = free ? 0 : priceOf(score, prices[item.pct]);
     const poor = score < price;
     const off = poor || S.busy || locked; // після «Готовий» магазин для гравця заблокований
     let action = "";
@@ -561,18 +562,19 @@ function viewShop() {
         <button class="btn" data-action="buy" data-arg="extraCard" ${off ? "disabled" : ""}>Додати</button>`;
     }
     return `<li class="shop-item ${poor ? "poor" : ""}">
-      <div class="shop-head"><span class="icon">${ITEM_ICON[item.id]}</span><b>${item.title}</b><span class="price">${plural(price, POINTS)}</span></div>
+      <div class="shop-head"><span class="icon">${ITEM_ICON[item.id]}</span><b>${item.title}</b><span class="price">${free ? "🎁 0" : plural(price, POINTS)}</span></div>
       <p class="muted small">${item.text}</p><div class="shop-act">${action}</div></li>`;
   }).join("");
   const log = mine.map((r) => {
     const item = SHOP_ITEMS.find((i) => i.id === r.item);
-    const st = r.status === "ok" ? `✓ −${plural(r.price ?? 0, POINTS)}` : r.status === "rejected" ? `✗ ${esc(r.reason)}` : "обробляється…";
+    const st = r.status === "ok" ? (r.free ? "✓ 🎁 безкоштовно" : `✓ −${plural(r.price ?? 0, POINTS)}`) : r.status === "rejected" ? `✗ ${esc(r.reason)}` : "обробляється…";
     return `<li><span>${esc(item?.title ?? r.item)}</span><span class="${r.status === "rejected" ? "error" : "muted"}">${st}</span></li>`;
   }).join("");
   return `<section class="panel">
     <h2>Магазин <span class="muted">у тебе ${plural(score, POINTS)}</span></h2>
     <p class="muted small">Бали — це і рахунок, і гроші. Ціна — відсоток від твоїх балів (мінімум 1). Купувати можна, поки ведучий не закрив магазин.</p>
     ${S.error ? `<p class="error">${esc(S.error)}</p>` : ""}
+    ${free ? `<p class="comeback">🎁 Камбек! Ти на останньому місці, тож наступна покупка — безкоштовна. Обирай що завгодно.</p>` : ""}
     ${locked ? `<p class="hint">Ти готовий — покупки заблоковано. Передумав? Натисни «Ще хочу щось купити».</p>` : ""}
     <ul class="shop${locked ? " locked" : ""}">${cards}</ul>
     ${log ? `<h3>Твої покупки</h3><ul class="shop-mine">${log}</ul>` : ""}

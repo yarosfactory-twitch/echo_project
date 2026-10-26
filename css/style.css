@@ -421,6 +421,28 @@ summary { cursor: pointer; color: var(--muted); }
 .stage-final .standings { max-width: 720px; }
 .stage-final .standings-list li { padding: 14px 18px; }
 .final-title { text-align: center; font-size: clamp(2rem, 4vw, 3.2rem); color: var(--brass); margin: 0 0 8px; }
+/* Титули у фіналі */
+.titles { max-width: 720px; margin: 8px auto 16px; text-align: left; }
+.titles-list { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.title-card {
+  display: grid; grid-template-columns: auto 1fr; grid-template-areas: "icon name" "icon who" "icon detail";
+  column-gap: 12px; row-gap: 2px; align-items: center; padding: 12px 14px;
+  background: rgba(0,0,0,.25); border: 1px solid rgba(212,169,74,.25); border-radius: 10px;
+  animation: title-in .5s ease-out both;
+}
+.title-card:nth-child(2) { animation-delay: .15s; }
+.title-card:nth-child(3) { animation-delay: .3s; }
+.title-card:nth-child(4) { animation-delay: .45s; }
+.title-card .t-icon { grid-area: icon; font-size: 2rem; line-height: 1; }
+.title-card .t-name { grid-area: name; font-size: .8rem; text-transform: uppercase; letter-spacing: .08em; color: var(--brass); font-weight: 700; }
+.title-card .t-who { grid-area: who; font-weight: 700; font-size: 1.1rem; overflow-wrap: anywhere; }
+.title-card .t-detail { grid-area: detail; }
+.title-card.silent { border-style: dashed; }
+@keyframes title-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.comeback {
+  text-align: center; padding: 10px 14px; margin: 10px auto; max-width: 640px; border-radius: 10px;
+  background: rgba(212,169,74,.14); border: 1px solid var(--brass); color: var(--cream); font-weight: 600;
+}
 /* До обертання: смуга порожня, з підказкою */
 .reel.idle .reel-band::after {
   content: "крути барабан"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;

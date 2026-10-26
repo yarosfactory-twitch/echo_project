@@ -99,6 +99,26 @@ export function standingsHTML(final) {
   </div>`;
 }
 
+/** Титули у фіналі (js/titles.js): значок, назва, хто отримав і за що. */
+const TITLE_INFO = {
+  chatFavorite: { icon: "💬", title: "Улюбленець чату", detail: (w) => `${plural(w.value, VOTES)} від чату` },
+  darkHorse: { icon: "🐎", title: "Темна конячка", detail: (w) => `+${plural(w.value, PLACES)} за раунд ${w.round}` },
+  roundRecord: { icon: "🚀", title: "Рекорд раунду", detail: (w) => `${plural(w.value, POINTS)} у раунді ${w.round}` },
+  silent: { icon: "🤫", title: "Тихий хід", detail: (w) => `${plural(w.value, TRACKS)} без жодного голосу` },
+};
+export function titlesHTML(titles = []) {
+  const list = (titles ?? []).filter((t) => TITLE_INFO[t.id] && t.winners?.length);
+  if (!list.length) return "";
+  const items = list.map((t) => {
+    const info = TITLE_INFO[t.id];
+    const who = t.winners.map((w) => esc(w.displayName ?? "?")).join(", ");
+    return `<li class="title-card ${t.id}"><span class="t-icon">${info.icon}</span>
+      <span class="t-name">${info.title}</span><span class="t-who">${who}</span>
+      <span class="t-detail muted small">${esc(info.detail(t.winners[0]))}</span></li>`;
+  }).join("");
+  return `<div class="titles"><h3 class="standings-title">Титули</h3><ul class="titles-list">${items}</ul></div>`;
+}
+
 /** Подія «Неоригінально!»: групи однакових треків і що з ними сталося. */
 export function originalityHTML(groups = []) {
   if (!groups.length) return "";
@@ -125,6 +145,9 @@ export function plural(n, [one, few, many]) {
 }
 export const CARDS = ["карта", "карти", "карт"];
 export const POINTS = ["бал", "бали", "балів"];
+export const VOTES = ["голос", "голоси", "голосів"];
+export const PLACES = ["місце", "місця", "місць"];
+export const TRACKS = ["трек", "треки", "треків"];
 
 // Переворот карти з сорочки на лицьовий бік: лише для щойно відкритої, один раз.
 // patch() перемальовує розмітку при кожній зміні (новий голос тощо), тож
