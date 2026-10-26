@@ -154,19 +154,77 @@ async function resolveSoundCloud(url) {
   return { key: `sc_${new URL(url).pathname.replace(/\W+/g, "_")}`, id: null, embed, ...meta };
 }
 
-/** Адреса плеєра для iframe на сторінці ведучого. YouTube стартує з card.start;
- *  SoundCloud перемотує ведучий через Widget API (див. host.js). */
-export function embedUrl(card) {
+// ── Безпека: дані карт приходять від гравців ────────────────
+// Гравець може записати в свою колоду в базі будь-що, оминаючи сайт. Тому перед тим, як
+// вставити адресу в плеєр (iframe) чи посилання, карту перевіряємо й перебудовуємо з
+// перевірених частин. Інакше, наприклад, embed = "javascript:…" виконався б на сторінці
+// ведучого з його правами.
+
+const SC_PLAYER = "https://w.soundcloud.com/player/";
+const LINK_HOSTS = new Set([
+  "youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be",
+  "soundcloud.com", "www.soundcloud.com", "m.soundcloud.com", "on.soundcloud.com",
+]);
+
+/** Посилання лише https на YouTube/SoundCloud, інакше "#". */
+export function safeHref(raw) {
+  try {
+    const u = new URL(String(raw));
+    return u.protocol === "https:" && LINK_HOSTS.has(u.hostname.toLowerCase()) ? u.toString() : "#";
+  } catch { return "#"; }
+}
+
+/** Готовий плеєр SoundCloud з відповіді oEmbed: лише w.soundcloud.com/player/ з треком api.soundcloud.com. */
+function safeScEmbed(raw) {
+  try {
+    const u = new URL(String(raw));
+    if (u.protocol !== "https:" || u.hostname !== "w.soundcloud.com" || u.pathname !== "/player/") return null;
+    const inner = new URL(u.searchParams.get("url") ?? "");
+    if (inner.protocol !== "https:" || !["api.soundcloud.com", "soundcloud.com"].includes(inner.hostname)) return null;
+    return `${SC_PLAYER}?url=${encodeURIComponent(inner.toString())}&visual=true`;
+  } catch { return null; }
+}
+
+/**
+ * Перевірена копія карти або null, якщо вона підроблена.
+ * Залишає лише відомі поля з перевіреними значеннями.
+ */
+export function sanitizeCard(card) {
+  if (!card || typeof card !== "object") return null;
+  const start = Math.min(86400, Math.max(0, Math.floor(Number(card.start) || 0)));
+  const text = (v, n) => String(v ?? "").slice(0, n);
+  const base = { title: text(card.title, 200) || "Без назви", author: text(card.author, 100), start, used: !!card.used };
+  if (card.burned) base.burned = true;
   if (card.source === "youtube") {
-    const start = card.start ? `&start=${Math.floor(card.start)}` : "";
+    const id = String(card.id ?? "");
+    if (!YT_ID.test(id)) return null;
+    const url = `https://www.youtube.com/watch?v=${id}${start ? `&t=${start}s` : ""}`;
+    return { ...base, key: `yt_${id}`, source: "youtube", id, embed: null, url };
+  }
+  if (card.source === "soundcloud") {
+    const href = safeHref(card.url);
+    const link = href === "#" ? "" : href;
+    const id = String(card.id ?? "");
+    if (/^\d{1,20}$/.test(id)) return { ...base, key: `sc_${id}`, source: "soundcloud", id, embed: null, url: link };
+    const embed = safeScEmbed(card.embed);
+    if (!embed) return null;
+    const key = /^sc_[A-Za-z0-9_]{1,200}$/.test(String(card.key)) ? String(card.key) : null;
+    return key ? { ...base, key, source: "soundcloud", id: null, embed, url: link } : null;
+  }
+  return null;
+}
+
+/** Адреса плеєра для iframe на сторінці ведучого. Порожньо, якщо карта підозріла.
+ *  YouTube стартує з card.start; SoundCloud перемотує ведучий через Widget API (host.js). */
+export function embedUrl(raw) {
+  const card = sanitizeCard(raw);
+  if (!card) return "";
+  if (card.source === "youtube") {
+    const start = card.start ? `&start=${card.start}` : "";
     // enablejsapi=1: щоб ведучий міг керувати гучністю через postMessage.
     return `https://www.youtube.com/embed/${card.id}?autoplay=1&rel=0&enablejsapi=1${start}`;
   }
-  if (!card.id && card.embed) {
-    const u = new URL(card.embed);
-    u.searchParams.set("auto_play", "true");
-    return u.toString();
-  }
+  if (card.embed) return `${card.embed}&auto_play=true`;
   const api = `https://api.soundcloud.com/tracks/${card.id}`;
-  return `https://w.soundcloud.com/player/?url=${encodeURIComponent(api)}&auto_play=true&visual=true`;
+  return `${SC_PLAYER}?url=${encodeURIComponent(api)}&auto_play=true&visual=true`;
 }

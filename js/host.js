@@ -10,7 +10,7 @@ import {
   MIN_ACCOUNT_AGE_DAYS, CHAT_BOTS, DEFAULT_SETTINGS,
 } from "./config.js";
 import { validateToken, getTwitchUser, revokeToken, accountAgeDays } from "./twitch.js";
-import { embedUrl, formatTimecode } from "./tracks.js";
+import { embedUrl, formatTimecode, sanitizeCard, safeHref } from "./tracks.js";
 import { VoteCollector } from "./votes.js";
 import { findDuplicateGroups, burnPlan, burnedKeys } from "./originality.js";
 import { connectChat } from "./chat.js";
@@ -629,7 +629,10 @@ async function closeDiscard() {
     card.used = true;
     batch.set(deckRef, { cards });
     batch.update(gref("players", p.uid), { cardCount: cards.filter((c) => !c.used).length });
-    if (move.type === "discard") plays.push({ p, card });
+    // Карта з колоди гравця — дані від гравця: у раунд іде лише перевірена копія.
+    const safe = sanitizeCard(card);
+    if (!safe) { log(`⚠ ${p.displayName}: підозріла карта, 0 балів`); continue; }
+    if (move.type === "discard") plays.push({ p, card: safe });
   }
 
   // «Черга» з магазину: куплені «першим»/«останнім» стають на початок/у кінець.
@@ -771,7 +774,9 @@ async function closeTbSubmit() {
   tbKeysCache = null;
   const n = g.round;
   const subs = (await getDocs(gcol("rounds", String(n), "tb"))).docs.map((d) => ({ uid: d.id, ...d.data() }))
-    .filter((x) => x.key && !x.rejected && g.tiebreak.tied.includes(x.uid));
+    .filter((x) => x.key && !x.rejected && g.tiebreak.tied.includes(x.uid))
+    .map((x) => { const c = sanitizeCard(x); return c ? { ...c, uid: x.uid } : null; }) // дані від гравця
+    .filter(Boolean);
   const byUid = (uid) => S.players.find((p) => p.uid === uid);
   const missing = g.tiebreak.tied.filter((uid) => !subs.some((x) => x.uid === uid));
   missing.forEach((uid) => log(`${byUid(uid)?.displayName} не встиг вставити трек і вибуває з тай-брейку`));
@@ -862,6 +867,12 @@ async function processShop() {
   if (!pending.length) maybeAutoCloseShop();
   for (const req of pending) {
     shopDone.add(req.id);
+    // Захист від спаму заявками: не більше 20 від одного гравця за магазин.
+    const mine = S.shopReqs.filter((r) => r.uid === req.uid).length;
+    if (mine > 20) {
+      await updateDoc(gref("rounds", String(S.game.round), "shop", req.id), { status: "rejected", reason: "Забагато заявок" }).catch(() => {});
+      continue;
+    }
     try {
       await handlePurchase(req);
     } catch (e) {
@@ -903,13 +914,13 @@ async function handlePurchase(req) {
   } else if (item.id === "respin") {
     batch.update(gref("players", p.uid), { tokens: increment(1) });
   } else if (item.id === "swap" || item.id === "extraCard") {
-    const card = req.card;
-    if (!card?.key) return reject("Немає треку");
+    // Трек у заявці — дані від гравця: беремо лише перевірену копію.
+    const clean = sanitizeCard({ ...(req.card ?? {}), used: false, burned: false });
+    if (!clean) return reject("Некоректний трек — встав посилання ще раз");
     // Трек, що збігається з будь-якою картою гри, купити не можна.
     const keys = await allGameKeys();
-    if (keys.has(card.key)) return reject("Цей трек уже є в грі — обери інший");
+    if (keys.has(clean.key)) return reject("Цей трек уже є в грі — обери інший");
     const cards = (await getDoc(deckRef)).data()?.cards ?? [];
-    const clean = { key: card.key, source: card.source, id: card.id ?? null, embed: card.embed ?? null, url: card.url, title: card.title, author: card.author ?? "", start: card.start ?? 0, used: false };
     if (item.id === "swap") {
       const i = cards.findIndex((c) => c.key === req.arg && !c.used);
       if (i < 0) return reject("Цієї карти вже немає в руці");
@@ -919,7 +930,7 @@ async function handlePurchase(req) {
     }
     batch.set(deckRef, { cards });
     batch.update(gref("players", p.uid), { cardCount: cards.filter((c) => !c.used).length });
-    registryKey = g.settings.mode !== "hardcore" ? card.key : null;
+    registryKey = g.settings.mode !== "hardcore" ? clean.key : null;
   }
   batch.update(gref("players", p.uid), { score: increment(-price) });
   batch.update(reqRef, { status: "ok", price });
@@ -1048,7 +1059,7 @@ function updatePlayer() {
   const from = card?.start ? ` · старт з ${formatTimecode(card.start)}` : "";
   els.player.innerHTML = src
     ? `<iframe src="${esc(src)}" allow="autoplay; encrypted-media" allowfullscreen></iframe>
-       <a class="link small" href="${esc(card.url)}" target="_blank" rel="noopener">Не грає? Відкрити в новій вкладці</a><span class="muted small">${from}</span>`
+       <a class="link small" href="${esc(safeHref(card.url))}" target="_blank" rel="noopener">Не грає? Відкрити в новій вкладці</a><span class="muted small">${from}</span>`
     : "";
   const iframe = els.player.querySelector("iframe");
   if (!iframe) return;
@@ -1200,7 +1211,7 @@ function viewControl() {
       const groups = g.originality?.groups ?? [];
       const pending = groups.filter((x) => x.decision === null).length;
       const rows = groups.filter((x) => x.type === "title").map((x) => `<div class="decide">
-          <div class="small">${x.cards.map((c) => `<div>${esc(c.displayName)}: <a class="link" href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.title)}</a></div>`).join("")}</div>
+          <div class="small">${x.cards.map((c) => `<div>${esc(c.displayName)}: <a class="link" href="${esc(safeHref(c.url))}" target="_blank" rel="noopener">${esc(c.title)}</a></div>`).join("")}</div>
           <div class="row">
             <button class="btn ${x.decision === "burn" ? "primary" : ""}" data-action="decide" data-arg="${esc(x.id)}|burn">Однакові, палимо</button>
             <button class="btn ${x.decision === "keep" ? "primary" : ""}" data-action="decide" data-arg="${esc(x.id)}|keep">Різні</button>

@@ -39,16 +39,26 @@ service cloud.firestore {
       match /players/{uid} {
         allow read: if true;
         allow create, delete: if isHost();
+        // Гравець змінює лише: готовність (true/false або номер раунду в магазині),
+        // кількість карт — тільки поки збирає колоду (лобі чи новачок), і «вийти» (status → out).
         allow update: if isHost() || (isSelf(uid)
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ready', 'cardCount', 'status'])
-          && (request.resource.data.status == resource.data.status || request.resource.data.status == 'out'));
+          && (request.resource.data.status == resource.data.status || request.resource.data.status == 'out')
+          && (request.resource.data.ready is bool || request.resource.data.ready is int)
+          && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['cardCount'])
+              || ((game(g).phase == 'lobby' || resource.data.status == 'pending')
+                  && request.resource.data.cardCount is int
+                  && request.resource.data.cardCount >= 0 && request.resource.data.cardCount <= 40)));
       }
 
       // Колода видна лише власнику і ведучому. Гравець редагує її в лобі,
       // а новачок посеред гри — поки не сів за стіл.
       match /decks/{uid} {
         allow read: if isHost() || isSelf(uid);
-        allow write: if isHost() || (isSelf(uid) && (game(g).phase == 'lobby' || isPendingPlayer(g)));
+        // Вміст карт ведучий однаково перевіряє (sanitizeCard), тут — лише розмір колоди.
+        allow write: if isHost() || (isSelf(uid) && (game(g).phase == 'lobby' || isPendingPlayer(g))
+          && request.resource.data.keys().hasOnly(['cards'])
+          && request.resource.data.cards is list && request.resource.data.cards.size() <= 40);
       }
 
       // Класичний режим: реєстр треків гри для перевірки дублікатів у лобі.
